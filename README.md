@@ -139,6 +139,12 @@ DM Sans for body copy, DM Mono for labels.
   the modal says so rather than showing an empty grid.
 - **A player can legitimately be all zeros.** A special-teams-only back with four appearances and no
   touches will send a bar of zeros — that's the real stat line, not a bug.
+- **Everything goes through `site.web.api.espn.com`, on purpose.** ESPN exposes the same team and
+  roster data on `site.api.espn.com`, but that host doesn't reliably send an
+  `Access-Control-Allow-Origin` header, and a browser hard-fails the request when it's missing — so
+  the team list and every roster would break while stats kept working. The `web.api` host returns
+  the identical payload (verified byte-for-byte apart from a response timestamp) *and* the CORS
+  header. Don't switch the host back.
 - **Responses are cached per URL for the session.** Clicking back to a timeframe you already looked
   at is instant; reload the page to force fresh numbers. Changing the season clears the cache.
 - **The 2026 season doesn't exist until September.** ESPN's "season 2025" runs Sept 2025 → Feb 2026,

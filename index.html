@@ -400,10 +400,15 @@
 const WORDMARK = "TALKIN' GIANTS";
 const HOME_TEAM_ID = 19;              // New York Giants (ESPN team id)
 
-// ESPN's public endpoints. Two hosts, both CORS-open (Access-Control-Allow-Origin: *), so this
-// works straight off GitHub Pages with no proxy and no API key.
-const SITE = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl';
-const WEB  = 'https://site.web.api.espn.com/apis/common/v3/sports/football/nfl';
+// ESPN's public endpoints — no API key. Both paths go through site.web.api.espn.com deliberately:
+// it serves the site/v2 tree identically to site.api.espn.com (verified byte-for-byte apart from a
+// response timestamp) but it actually returns Access-Control-Allow-Origin. site.api.espn.com does
+// not send that header reliably, and a browser hard-fails the fetch when it's missing — which took
+// out the team list and every roster while leaving stats working, since those were already here.
+// Don't "simplify" the host back.
+const HOST = 'https://site.web.api.espn.com';
+const SITE = `${HOST}/apis/site/v2/sports/football/nfl`;
+const WEB  = `${HOST}/apis/common/v3/sports/football/nfl`;
 
 const j = u => fetch(u).then(r => { if (!r.ok) throw new Error(u + ' → ' + r.status); return r.json(); });
 const jCache = new Map();
