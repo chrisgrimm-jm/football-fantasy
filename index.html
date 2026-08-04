@@ -1,0 +1,1682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stat Snapshot — Talkin' Giants</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* =====================================================================================
+     BRAND — this block is the single source of truth for the look, including the canvas
+     PNG export (the JS reads these values back out of :root rather than hardcoding them).
+     Change a hex here and the whole app + both graphics follow.
+     ===================================================================================== */
+  :root{
+    --brand:#003981;          /* Talkin' Giants blue */
+    --accent:#c9243f;         /* Giants red — top rule, active pills, buttons */
+    --label:#8fbdf0;          /* small-caps stat labels; light blue reads far better on blue than red */
+
+    /* the lower-third gradient sweep, derived from --brand */
+    --lt-from:#002856;
+    --lt-mid:#003981;
+    --lt-to:#001b3b;
+
+    --bg:#00152e;
+    --surface:#012f60;
+    --surface2:#08447e;
+    --surface3:#001c3d;
+    --border:rgba(255,255,255,0.1);
+    --border2:rgba(255,255,255,0.2);
+    --accent-dim:rgba(201,36,63,0.15);
+    --accent-dim2:rgba(201,36,63,0.07);
+    --red:#ff6b6b;
+    --red-dim:rgba(255,107,107,0.15);
+    --green:#5fddaa;
+    --green-dim:rgba(95,221,170,0.12);
+    --white:#ffffff;
+    --text:#ffffff;
+    --text2:rgba(255,255,255,0.55);
+    --text3:rgba(255,255,255,0.30);
+    --font-display:'Bebas Neue',sans-serif;
+    --font-body:'DM Sans',sans-serif;
+    --font-mono:'DM Mono',monospace;
+    --radius:6px;
+    --radius-lg:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);
+    -webkit-font-smoothing:antialiased}
+
+  /* ---- header ---- */
+  header{padding:16px 22px 14px;border-bottom:1px solid var(--border);background:var(--surface3);
+    position:sticky;top:0;z-index:40}
+  .eyebrow{font-family:var(--font-mono);font-size:10px;letter-spacing:.22em;color:var(--label);
+    text-transform:uppercase;margin:0 0 8px;opacity:.9}
+  .titlerow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  h1{font-family:var(--font-display);font-weight:400;font-size:40px;line-height:1;margin:0;
+    letter-spacing:.03em;color:var(--white)}
+  h1 span{color:var(--accent)}
+  .home-btn{background:none;color:var(--label);border:1px solid rgba(143,189,240,.35);border-radius:20px;
+    padding:6px 15px;font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;
+    text-transform:uppercase;cursor:pointer;flex:none;transition:all .15s}
+  .home-btn:hover{background:var(--label);border-color:var(--label);color:var(--surface3)}
+  .teambadge{display:flex;align-items:center;gap:9px}
+  .teambadge img{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.92);padding:3px;
+    object-fit:contain}
+  .teambadge .tn{font-family:var(--font-display);font-size:17px;letter-spacing:.06em;
+    color:var(--text2);line-height:1}
+  .datanote{position:absolute;top:16px;right:22px;font-family:var(--font-mono);font-size:9px;
+    letter-spacing:.14em;color:var(--text3);background:var(--accent-dim2);
+    border:1px solid var(--border);border-radius:20px;padding:5px 12px;text-transform:uppercase}
+  .datanote b{color:var(--label);font-weight:400}
+
+  .controls{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-top:14px}
+  label{display:block;font-family:var(--font-mono);font-size:9px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--label);margin-bottom:5px;opacity:.9}
+  select,input{background:var(--surface);color:var(--text);border:1px solid var(--border);
+    border-radius:var(--radius);padding:8px 10px;font-family:var(--font-body);font-size:14px;
+    max-width:min(60vw,520px)}
+  select:focus,input:focus{outline:none;border-color:var(--label)}
+  input::placeholder{color:var(--text3)}
+  select option{background:var(--surface3);color:var(--text)}
+
+  #status{padding:16px 22px;color:var(--text2);font-size:13px}
+  #status.err{color:var(--red)}
+  #status:empty{display:none}
+  main{padding:0 22px 60px}
+  h2{font-family:var(--font-display);font-weight:400;font-size:26px;margin:28px 0 10px;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--white)}
+
+  /* ---- tables ---- */
+  .wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-lg);
+    background:var(--surface3)}
+  table{border-collapse:separate;border-spacing:0;font-size:14px;width:100%}
+  th,td{padding:9px 14px;text-align:left;border-bottom:1px solid var(--border)}
+  thead th{position:sticky;top:0;background:var(--surface3);z-index:10;
+    font-family:var(--font-mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--label);border-bottom:1px solid var(--border2)}
+  thead th[data-key]{cursor:pointer;user-select:none;transition:color .15s}
+  thead th[data-key]:hover{color:var(--white)}
+  thead th[data-key].sort-asc,thead th[data-key].sort-desc{color:var(--white)}
+  thead th[data-key].sort-asc::after{content:" ▲";font-size:8px;color:var(--accent)}
+  thead th[data-key].sort-desc::after{content:" ▼";font-size:8px;color:var(--accent)}
+  td.num{text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--text2)}
+  tr.group td{background:var(--brand);font-family:var(--font-display);font-weight:400;
+    font-size:17px;color:var(--white);letter-spacing:.1em;padding:7px 14px;text-transform:uppercase;
+    border-bottom:1px solid var(--border2)}
+  table.players tbody tr:not(.group){cursor:pointer;transition:background .12s}
+  table.players tbody tr:not(.group):hover td{background:rgba(143,189,240,.08)}
+  table.players td.name{font-weight:500;color:var(--white)}
+  table.players tbody tr:not(.group):hover td.name{color:var(--label)}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-family:var(--font-mono);
+    font-size:9px;letter-spacing:.1em;text-transform:uppercase}
+  .badge.active{background:var(--green-dim);color:var(--green)}
+  .badge.out{background:var(--red-dim);color:var(--red)}
+  .badge.res{background:rgba(255,255,255,.07);color:var(--text2)}
+  .metanote{color:var(--text3);font-size:12px;font-family:var(--font-mono);margin:0 0 12px}
+
+  /* ---- team directory (default browse view) ---- */
+  .leaguehead{font-family:var(--font-display);font-weight:400;font-size:24px;letter-spacing:.08em;
+    color:var(--white);text-transform:uppercase;margin:26px 0 2px}
+  .divhead{font-family:var(--font-mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--label);margin:16px 0 8px;opacity:.85}
+  .team-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;
+    margin-bottom:8px}
+  .team-card{display:flex;align-items:center;gap:10px;border:1px solid var(--border);
+    border-radius:var(--radius);padding:9px 12px;background:var(--surface);cursor:pointer;
+    text-align:left;transition:all .15s}
+  .team-card:hover{border-color:rgba(143,189,240,.45);background:var(--surface2)}
+  .team-card.home{border-color:rgba(201,36,63,.55)}
+  .team-card img{width:28px;height:28px;object-fit:contain;flex:none}
+  .team-card .tname{font-family:var(--font-display);font-weight:400;font-size:16px;
+    letter-spacing:.04em;line-height:1.1;color:var(--text)}
+
+  button{background:var(--surface);color:var(--text);border:1px solid var(--border);
+    border-radius:var(--radius);padding:8px 14px;font-family:var(--font-mono);font-size:10px;
+    letter-spacing:.12em;text-transform:uppercase;cursor:pointer;transition:all .15s}
+  button:hover{border-color:rgba(143,189,240,.45);color:var(--label)}
+  button:disabled{opacity:.35;cursor:default;border-color:var(--border);color:var(--text2)}
+  @media (max-width:640px){
+    .datanote{position:static;display:inline-block;margin:0 0 10px}
+    h1{font-size:32px}
+  }
+
+  /* ---- player modal ---- */
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,10,22,.8);backdrop-filter:blur(3px);
+    display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
+  .modal-backdrop[hidden]{display:none}
+  .modal{background:var(--surface3);border:1px solid var(--border2);border-radius:var(--radius-lg);
+    max-width:520px;width:100%;max-height:88vh;overflow:auto;padding:24px;position:relative;
+    box-shadow:0 24px 70px rgba(0,0,0,.6)}
+  .modal-close{position:absolute;top:12px;right:12px;background:none;border:1px solid var(--border);
+    color:var(--text2);width:28px;height:28px;border-radius:50%;font-size:16px;line-height:1;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+  .modal-close:hover{color:var(--accent);border-color:var(--accent)}
+  .modal-head{display:flex;align-items:center;gap:15px;margin-bottom:14px;padding-right:38px}
+  .modal-headshot{width:74px;height:74px;border-radius:50%;object-fit:cover;background:var(--surface);
+    border:2px solid var(--accent);flex:none}
+  .modal-name{font-family:var(--font-display);font-weight:400;font-size:30px;letter-spacing:.03em;
+    line-height:1;color:var(--white)}
+  .modal-sub{color:var(--text2);font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;
+    text-transform:uppercase;margin-top:7px}
+
+  .tf-pills{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px}
+  .tf-pill{background:none;color:var(--text2);border:1px solid var(--border);border-radius:20px;
+    padding:6px 13px;font-family:var(--font-mono);font-size:9px;letter-spacing:.12em;
+    text-transform:uppercase;cursor:pointer;transition:all .15s}
+  .tf-pill:hover{border-color:rgba(201,36,63,.5);color:var(--white)}
+  .tf-pill.on{background:var(--accent);border-color:var(--accent);color:var(--white)}
+  .oppRow{margin:0 0 16px}
+  .oppRow[hidden]{display:none}
+  .oppRow select{font-family:var(--font-mono);font-size:12px;padding:6px 9px}
+
+  .modal-export-row{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 4px}
+  .modal-export-btn{background:var(--accent);color:var(--white);border:1px solid var(--accent);
+    border-radius:var(--radius);padding:11px 18px;font-family:var(--font-display);font-weight:400;
+    font-size:17px;letter-spacing:.06em;cursor:pointer;text-transform:uppercase;transition:all .15s}
+  .modal-export-btn:hover{background:#e02c48;border-color:#e02c48;color:var(--white)}
+  .modal-export-btn:disabled{opacity:.35;cursor:default;background:var(--surface);color:var(--text2);
+    border-color:var(--border)}
+  /* already the line on screen — reads as status, and a re-press is a harmless re-send */
+  .modal-export-btn.live{background:var(--green);border-color:var(--green);color:#00281a}
+  .modal-export-btn.live:hover{background:#7ce9bd;border-color:#7ce9bd;color:#00281a}
+  .modal-section{margin-bottom:18px}
+  .modal-section h3{font-family:var(--font-mono);font-size:9px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--label);margin:0 0 10px;opacity:.9;font-weight:400}
+  .modal-line{font-family:var(--font-mono);font-size:15px;color:var(--white);margin-bottom:12px;
+    letter-spacing:.02em}
+  .modal-hitline{font-family:var(--font-display);font-weight:400;font-size:19px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--text2);margin-bottom:6px}
+  .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .stat-grid .cell{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:9px 4px;text-align:center}
+  .stat-grid .cell.pick{border-color:rgba(201,36,63,.45);background:var(--accent-dim2)}
+  .stat-grid .cell .v{font-family:var(--font-display);font-weight:400;font-size:24px;line-height:1;
+    color:var(--white);letter-spacing:.02em}
+  .stat-grid .cell .k{font-family:var(--font-mono);font-size:8px;color:var(--label);
+    text-transform:uppercase;letter-spacing:.14em;margin-top:6px;opacity:.9}
+  .modal-empty{color:var(--text3);font-size:13px;font-family:var(--font-mono)}
+  .modal-dlnote{color:var(--text3);font-size:10px;font-family:var(--font-mono);text-align:right;
+    margin-top:10px;min-height:14px}
+  .gamelog{width:100%;font-size:12px;margin-top:4px}
+  .gamelog th,.gamelog td{padding:5px 7px}
+  .gamelog th{font-family:var(--font-mono);font-size:8px;letter-spacing:.12em;color:var(--label)}
+  .gamelog td{font-family:var(--font-mono);font-size:11px;color:var(--text2)}
+  .gamelog td.w{color:var(--green)}
+  .gamelog td.l{color:var(--red)}
+
+  /* ---- control page: on-air status chip ---- */
+  .onair{display:flex;align-items:center;gap:10px;margin-top:14px;font-family:var(--font-mono);
+    font-size:10px;letter-spacing:.1em;color:var(--text2);text-transform:uppercase}
+  .onair[hidden]{display:none}   /* author display:flex would otherwise beat the hidden attribute */
+  .onair-dot{width:8px;height:8px;border-radius:50%;background:var(--red);flex:none;
+    box-shadow:0 0 0 4px var(--red-dim);animation:onair-pulse 1.6s ease-in-out infinite}
+  @keyframes onair-pulse{50%{opacity:.3}}
+  #onairText b{color:var(--label);font-weight:400}
+  .exit-btn{background:none;color:var(--red);border:1px solid rgba(255,107,107,.4);
+    border-radius:var(--radius);padding:6px 13px;font-family:var(--font-mono);font-size:9px;
+    letter-spacing:.12em;text-transform:uppercase;cursor:pointer;transition:all .15s}
+  .exit-btn:hover{background:var(--red);border-color:var(--red);color:var(--surface3)}
+
+  /* ---- Firebase link status chip ---- */
+  .feed{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:9px;
+    letter-spacing:.12em;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);
+    border-radius:20px;padding:6px 12px}
+  .feed-dot{width:7px;height:7px;border-radius:50%;background:var(--text3);flex:none}
+  .feed.live .feed-dot{background:var(--green);box-shadow:0 0 0 3px var(--green-dim)}
+  .feed.live{color:var(--green);border-color:rgba(95,221,170,.3)}
+
+  /* ---- connection: which Firebase room the control page and the display share ---- */
+  .connect{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;
+    background:var(--accent-dim2);border:1px solid var(--border);border-radius:var(--radius);
+    padding:11px 14px}
+  .connect .k{font-family:var(--font-mono);font-size:9px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--label);opacity:.9}
+  .connect input{min-width:260px;font-family:var(--font-mono);font-size:13px}
+  .connect-btn{background:var(--accent);color:var(--white);border:1px solid var(--accent);
+    font-family:var(--font-display);font-size:16px;letter-spacing:.06em;padding:7px 18px}
+  .connect-btn:hover{background:#e02c48;border-color:#e02c48;color:var(--white)}
+  .conn-pill{font-family:var(--font-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+    border:1px solid var(--border);border-radius:20px;padding:6px 12px;color:var(--text3)}
+  .conn-pill.ok{color:var(--green);border-color:rgba(95,221,170,.35);background:var(--green-dim)}
+  .connect .hint{font-family:var(--font-mono);font-size:9px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--text3);flex-basis:100%}
+  .connect .hint.warn{color:var(--red)}
+
+  /* ---- the URL to paste into the OBS machine's Browser Source ---- */
+  .obsurl{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;
+    background:var(--accent-dim2);border:1px solid var(--border);border-radius:var(--radius);
+    padding:9px 13px}
+  .obsurl[hidden]{display:none}
+  .obsurl .k{font-family:var(--font-mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--label);opacity:.9}
+  .obsurl code{font-family:var(--font-mono);font-size:12px;color:var(--white);
+    background:var(--surface3);border:1px solid var(--border);border-radius:4px;padding:5px 9px;
+    user-select:all;word-break:break-all}
+  .obsurl .hint{font-family:var(--font-mono);font-size:9px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--text3)}
+
+  /* ---- OBS display view (?display=1) ---- */
+  #lowerThirdDisplay{display:none}
+  body.display-mode #lowerThirdDisplay{display:block;position:relative;width:1920px;height:1080px}
+  /* always present in the DOM (it's position:absolute, so it never affects layout) — shown/hidden and
+     swapped between players purely via opacity, so bringing it on, taking it off, or switching to a
+     new player all get a smooth fade instead of an instant pop */
+  .lt-bar{display:flex;align-items:center;gap:24px;position:absolute;left:0;right:0;bottom:60px;
+    height:200px;padding:0 44px;background-color:var(--lt-mid);
+    background-image:linear-gradient(var(--accent),var(--accent)),
+      linear-gradient(90deg,var(--lt-from) 0%,var(--lt-mid) 55%,var(--lt-to) 100%);
+    background-repeat:no-repeat,no-repeat;background-size:100% 6px,100% 100%;
+    background-position:top left,top left;
+    box-sizing:border-box;opacity:0;pointer-events:none;transition:opacity .35s ease}
+  .lt-bar.lt-visible{opacity:1}
+  .lt-headshot{width:152px;height:152px;border-radius:50%;object-fit:cover;background:var(--lt-mid);
+    border:4px solid var(--accent);flex:none}
+  .lt-info{flex:none;min-width:0}
+  .lt-name{font-family:'Bebas Neue',sans-serif;font-weight:400;font-size:68px;line-height:1;
+    letter-spacing:.02em;color:#ffffff;white-space:nowrap}
+  .lt-sub{font-family:'DM Mono',monospace;font-weight:500;font-size:22px;color:var(--label);
+    text-transform:uppercase;letter-spacing:.16em;white-space:nowrap;margin-top:11px}
+  .lt-divider{width:1px;align-self:stretch;margin:36px 0;background:rgba(255,255,255,.18);flex:none}
+  .lt-stats{flex:1;min-width:0;text-align:center}
+  .lt-hitline{font-family:'DM Mono',monospace;font-weight:500;font-size:20px;letter-spacing:.16em;
+    color:rgba(255,255,255,.7);text-transform:uppercase;margin-bottom:10px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lt-hitline .split{color:var(--accent);font-weight:500}
+  /* never wraps to a second row — sizeCells() in JS shrinks cell width + font to fit whatever
+     count of stats is on screen, in one line, same as the canvas PNG export does */
+  .lt-cells{display:flex;justify-content:center;align-items:flex-end;gap:0;flex-wrap:nowrap;width:100%}
+  /* the padding is what keeps a shrunk-to-fit value from butting against its neighbour */
+  .lt-cells .lt-cell{width:150px;flex:0 0 auto;text-align:center;min-width:0;padding:0 8px}
+  .lt-cell .v{font-family:'Bebas Neue',sans-serif;font-weight:400;font-size:76px;line-height:1;
+    color:#ffffff;letter-spacing:.02em;white-space:nowrap;overflow:hidden}
+  .lt-cell .k{font-family:'DM Mono',monospace;font-weight:500;font-size:17px;color:var(--label);
+    text-transform:uppercase;letter-spacing:.14em;white-space:nowrap;overflow:hidden;margin-top:10px}
+  .lt-watermark{position:absolute;right:24px;bottom:14px;font-family:'DM Mono',monospace;
+    font-size:12px;letter-spacing:.2em;color:rgba(255,255,255,.3);text-transform:uppercase}
+  body.display-mode{background:transparent}
+  body.display-mode header, body.display-mode main, body.display-mode #status,
+  body.display-mode .modal-backdrop{display:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="datanote" id="datanote">Data <b>Live via ESPN</b></div>
+  <div class="eyebrow">Talkin' Giants</div>
+  <div class="titlerow">
+    <h1>STAT SNAPSHOT<span>.</span></h1>
+    <button id="goHome" class="home-btn" type="button" title="Back to all 32 teams">⌂ All Teams</button>
+    <button id="goGiants" class="home-btn" type="button" title="Jump to the Giants roster">Giants</button>
+    <div class="teambadge" id="teambadge"></div>
+  </div>
+  <div class="controls">
+    <div><label for="season">Season</label><select id="season"></select></div>
+    <div><label for="division">Division</label><select id="division"><option value="">All Divisions</option></select></div>
+    <div><label for="team">Team</label><select id="team"><option value="">Select a team…</option></select></div>
+    <div><label for="find">Global player search</label><input id="find" type="search" placeholder="Search any NFL player…" autocomplete="off"></div>
+    <div><label>OBS Display</label>
+      <button id="openDisplay" type="button">Open Display ↗</button>
+    </div>
+    <div><label>Link</label>
+      <span class="feed" id="feedChip"><span class="feed-dot"></span><span id="feedText">connecting…</span></span>
+    </div>
+  </div>
+  <div class="connect" id="connectRow">
+    <span class="k">Connection</span>
+    <input id="topicInput" type="text" placeholder="room name" autocomplete="off" spellcheck="false">
+    <button id="connectBtn" class="connect-btn" type="button">Connect</button>
+    <span class="conn-pill" id="connStatus">not connected</span>
+    <button id="copyDisplayBtn" type="button" disabled>Copy Display URL</button>
+    <span class="hint" id="connHint"></span>
+  </div>
+  <div class="obsurl" id="obsUrl" hidden>
+    <span class="k">OBS Browser Source URL</span>
+    <code id="obsUrlText"></code>
+    <button id="obsUrlCopy" type="button">Copy</button>
+    <span class="hint" id="obsUrlHint">Paste into the Browser Source on the OBS computer · 1920×1080</span>
+  </div>
+  <div class="onair" id="onair" hidden>
+    <span class="onair-dot"></span>
+    <span id="onairText"></span>
+    <button id="onairClear" class="exit-btn" type="button" title="Remove the lower third from OBS">✕ Exit Lower Third</button>
+  </div>
+</header>
+<div id="status">Loading…</div>
+<main id="out"></main>
+
+<div id="modalBackdrop" class="modal-backdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalName">
+    <button id="modalClose" class="modal-close" type="button" aria-label="Close">×</button>
+    <div class="modal-head">
+      <img id="modalHeadshot" class="modal-headshot" alt="">
+      <div>
+        <div class="modal-name" id="modalName"></div>
+        <div class="modal-sub" id="modalSub"></div>
+      </div>
+    </div>
+    <div class="tf-pills" id="tfPills"></div>
+    <div class="oppRow" id="oppRow" hidden>
+      <label for="oppSelect">Opponent</label>
+      <select id="oppSelect"></select>
+    </div>
+    <div id="modalBody" class="modal-body"></div>
+    <div class="modal-export-row" id="modalExportRow">
+      <button id="modalSend" class="modal-export-btn" type="button" hidden
+        title="Put this stat line on the OBS lower third">▶ Send to OBS</button>
+      <button id="modalExitOnAir" class="exit-btn" type="button"
+        title="Remove the lower third from OBS">✕ Exit Lower Third</button>
+    </div>
+    <div id="modalDlNote" class="modal-dlnote"></div>
+  </div>
+</div>
+
+<!-- OBS Browser Source view: add this same URL with ?display=1&topic=<room> as a Browser Source. -->
+<div id="lowerThirdDisplay">
+  <div class="lt-bar" id="ltBar">
+    <img id="ltHeadshot" class="lt-headshot" alt="">
+    <div class="lt-info">
+      <div class="lt-name" id="ltName"></div>
+      <div class="lt-sub" id="ltSub"></div>
+    </div>
+    <div class="lt-divider"></div>
+    <div class="lt-stats">
+      <div class="lt-hitline" id="ltHitline"></div>
+      <div class="lt-cells" id="ltCells"></div>
+    </div>
+    <div class="lt-watermark" id="ltWatermark">Talkin' Giants</div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+<script>
+// =====================================================================================
+// Config
+// =====================================================================================
+
+// The show's wordmark, baked into the bar and the PNG. Colours live in :root above.
+const WORDMARK = "TALKIN' GIANTS";
+const HOME_TEAM_ID = 19;              // New York Giants (ESPN team id)
+
+// ESPN's public endpoints. Two hosts, both CORS-open (Access-Control-Allow-Origin: *), so this
+// works straight off GitHub Pages with no proxy and no API key.
+const SITE = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl';
+const WEB  = 'https://site.web.api.espn.com/apis/common/v3/sports/football/nfl';
+
+const j = u => fetch(u).then(r => { if (!r.ok) throw new Error(u + ' → ' + r.status); return r.json(); });
+const jCache = new Map();
+const jc = u => (jCache.has(u) ? jCache.get(u) : (jCache.set(u, j(u)), jCache.get(u)));
+const $ = id => document.getElementById(id);
+const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+
+const params = new URLSearchParams(location.search);
+const isDisplayMode = params.get('display') === '1';
+if (isDisplayMode) document.body.classList.add('display-mode');
+
+const LT_KEY = 'tg-lower-third-onair';
+const TOPIC_KEY = 'tg-snapshot-topic';
+let TOPIC = params.get('topic') || '';
+const ltChannel = 'BroadcastChannel' in window ? new BroadcastChannel('tg-lower-third') : null;
+
+const logoURL = abbr => `https://a.espncdn.com/i/teamlogos/nfl/500/${String(abbr).toLowerCase()}.png`;
+const headshotURL = pid => `https://a.espncdn.com/i/headshots/nfl/players/full/${pid}.png`;
+
+function say(msg, isErr) { $('status').textContent = msg || ''; $('status').className = isErr ? 'err' : ''; }
+
+// one place to change the show name — the bar's watermark follows it
+if ($('ltWatermark')) $('ltWatermark').textContent = WORDMARK;
+
+// =====================================================================================
+// Firebase transport (shared Jomboy project — same one Prompter and both Pinpoints use)
+// =====================================================================================
+// Replaces the ntfy topic the baseball version uses. RTDB pushes to every subscriber over one
+// socket the SDK keeps alive itself, so there's no SSE-stalls-behind-a-proxy problem to paper
+// over with a polling safety net, and the last value is stored server-side — an OBS Browser
+// Source that refreshes mid-show gets the current graphic back on connect, for free.
+
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBG2PS2muH4i27HefuLeBnZWW-TZ5dkMCw",
+  authDomain: "pinpoint-abf21.firebaseapp.com",
+  databaseURL: "https://pinpoint-abf21-default-rtdb.firebaseio.com",
+  projectId: "pinpoint-abf21",
+  storageBucket: "pinpoint-abf21.firebasestorage.app",
+  messagingSenderId: "947703489099",
+  appId: "1:947703489099:web:c4ed96cfbaeeda594463ce"
+};
+
+let _db = null;
+try {
+  firebase.initializeApp(FIREBASE_CONFIG);
+  _db = firebase.database();
+} catch (e) { /* offline / SDK blocked — the app still works, just without the OBS link */ }
+
+const roomKey = t => String(t || '').trim().replace(/[.#$\[\]\/\s]+/g, '-');
+function onAirRef() {
+  if (!_db || !TOPIC) return null;
+  return _db.ref('nflstats/' + roomKey(TOPIC) + '/onair');
+}
+
+function setFeed(live) {
+  const chip = $('feedChip'); if (!chip) return;
+  chip.classList.toggle('live', !!live);
+  $('feedText').textContent = live ? 'live (Firebase)' : 'offline';
+}
+if (_db) _db.ref('.info/connected').on('value', s => setFeed(!!s.val()));
+else setFeed(false);
+
+function setConn(ok) {
+  const pill = $('connStatus'); if (!pill) return;
+  pill.classList.toggle('ok', !!ok);
+  pill.textContent = ok ? 'connected' : 'not connected';
+  const btn = $('copyDisplayBtn'); if (btn) btn.disabled = !ok;
+  const box = $('obsUrl');
+  if (box) {
+    box.hidden = !ok;
+    if (ok) $('obsUrlText').textContent = displayURL();
+  }
+}
+
+// Writes the on-air payload to the room. `null` clears it.
+function publishTopic(payload) {
+  const ref = onAirRef();
+  if (!ref) return;
+  if (!payload) { ref.remove().catch(() => {}); return; }
+  ref.set({ ...payload, ts: firebase.database.ServerValue.TIMESTAMP }).catch(() => {});
+}
+
+// =====================================================================================
+// Teams / divisions
+// =====================================================================================
+// ESPN's /teams response carries no conference or division, so the alignment is a static map.
+// It's been unchanged since 2002 realignment, which makes hardcoding it more reliable than
+// scraping standings for it — and one fewer request at load.
+
+const ALIGNMENT = {
+  AFC: {
+    East:  ['BUF', 'MIA', 'NE', 'NYJ'],
+    North: ['BAL', 'CIN', 'CLE', 'PIT'],
+    South: ['HOU', 'IND', 'JAX', 'TEN'],
+    West:  ['DEN', 'KC', 'LV', 'LAC'],
+  },
+  NFC: {
+    East:  ['DAL', 'NYG', 'PHI', 'WSH'],
+    North: ['CHI', 'DET', 'GB', 'MIN'],
+    South: ['ATL', 'CAR', 'NO', 'TB'],
+    West:  ['ARI', 'LAR', 'SF', 'SEA'],
+  },
+};
+
+// abbr -> {conf, div, short} e.g. NYG -> {conf:'NFC', div:'East', short:'NFC East'}
+const DIV_OF = {};
+Object.entries(ALIGNMENT).forEach(([conf, divs]) =>
+  Object.entries(divs).forEach(([div, abbrs]) =>
+    abbrs.forEach(a => { DIV_OF[a] = { conf, div, short: `${conf} ${div}` }; })));
+
+let teamsById = new Map();       // id (string) -> {id, abbr, name, color, altColor, div}
+let divisions = [];              // [{conf, div, short, teams:[...]}] in display order
+let currentTeamId = null;
+let currentView = 'directory';
+
+async function loadTeams() {
+  const d = await jc(`${SITE}/teams`);
+  const raw = (((d.sports || [])[0] || {}).leagues || [])[0] || {};
+  const teams = (raw.teams || []).map(x => x.team).filter(Boolean).map(t => ({
+    id: String(t.id),
+    abbr: t.abbreviation,
+    name: t.displayName,
+    short: t.shortDisplayName,
+    color: t.color ? '#' + t.color : null,
+    altColor: t.alternateColor ? '#' + t.alternateColor : null,
+    div: DIV_OF[t.abbreviation] || null,
+  }));
+  teamsById = new Map(teams.map(t => [t.id, t]));
+
+  divisions = [];
+  Object.entries(ALIGNMENT).forEach(([conf, divs]) =>
+    Object.entries(divs).forEach(([div, abbrs]) => {
+      const list = abbrs.map(a => teams.find(t => t.abbr === a)).filter(Boolean)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      divisions.push({ conf, div, short: `${conf} ${div}`, teams: list });
+    }));
+
+  $('division').innerHTML = '<option value="">All Divisions</option>' +
+    divisions.map(dv => `<option value="${dv.short}">${dv.short}</option>`).join('');
+  populateTeamSelect();
+}
+
+function populateTeamSelect(divFilter) {
+  const list = divFilter ? divisions.filter(dv => dv.short === divFilter) : divisions;
+  const opts = list.map(dv =>
+    `<optgroup label="${dv.short}">` +
+    dv.teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('') +
+    `</optgroup>`).join('');
+  $('team').innerHTML = '<option value="">Select a team…</option>' + opts;
+}
+
+function setTeamBadge(team) {
+  const box = $('teambadge');
+  if (!team) { box.innerHTML = ''; return; }
+  box.innerHTML = `<img src="${logoURL(team.abbr)}" alt="${team.name}" onerror="this.remove()">` +
+    `<span class="tn">${team.name}</span>`;
+}
+
+// =====================================================================================
+// Directory (default browse view) — all 32, by conference and division
+// =====================================================================================
+
+function renderDirectory(divFilter) {
+  currentView = 'directory';
+  setTeamBadge(null);
+  const out = $('out'); out.innerHTML = '';
+  say('');
+  const list = divFilter ? divisions.filter(dv => dv.short === divFilter) : divisions;
+  let curConf = null;
+  list.forEach(dv => {
+    if (dv.conf !== curConf) { out.appendChild(el('div', 'leaguehead', dv.conf)); curConf = dv.conf; }
+    out.appendChild(el('div', 'divhead', dv.short));
+    const grid = el('div', 'team-grid');
+    dv.teams.forEach(t => {
+      const card = el('button', 'team-card' + (+t.id === HOME_TEAM_ID ? ' home' : ''));
+      card.type = 'button';
+      card.innerHTML = `<img src="${logoURL(t.abbr)}" alt="" onerror="this.remove()"><span class="tname">${t.name}</span>`;
+      card.onclick = () => { $('team').value = t.id; $('division').value = dv.short; guard(loadRoster)(t.id); };
+      grid.appendChild(card);
+    });
+    out.appendChild(grid);
+  });
+}
+
+// =====================================================================================
+// Roster
+// =====================================================================================
+// ESPN groups the roster for us — offense / defense / specialTeam / injuredReserveOrOut /
+// suspended / practiceSquad — which maps onto the baseball tool's Active / IL / Reserve split
+// more cleanly than the 40-man does.
+
+const GROUP_LABELS = {
+  offense: ['OFFENSE', 'active'],
+  defense: ['DEFENSE', 'active'],
+  specialTeam: ['SPECIAL TEAMS', 'active'],
+  injuredReserveOrOut: ['INJURED RESERVE / OUT', 'out'],
+  suspended: ['SUSPENDED', 'out'],
+  practiceSquad: ['PRACTICE SQUAD', 'res'],
+};
+const GROUP_ORDER = ['offense', 'defense', 'specialTeam', 'injuredReserveOrOut', 'suspended', 'practiceSquad'];
+
+const POS_ORDER = { QB:1, RB:2, FB:3, WR:4, TE:5, OT:6, G:7, C:8, LS:9, DE:10, DT:11, NT:12,
+                    LB:13, OLB:14, ILB:15, MLB:16, CB:17, S:18, FS:19, SS:20, PK:21, K:22, P:23 };
+const posRank = p => POS_ORDER[p] ?? 50;
+
+// Pull just the fields we need — the raw roster payload is ~430KB a team, most of it contracts
+// and link blobs we never look at, and the background index holds all 32 in memory at once.
+function slimRoster(data) {
+  const rows = [];
+  (data.athletes || []).forEach(g => {
+    (g.items || []).forEach(a => {
+      rows.push({
+        id: String(a.id),
+        name: a.fullName || a.displayName || '',
+        pos: (a.position && a.position.abbreviation) || '',
+        number: a.jersey || '',
+        group: g.position,
+        injury: (a.injuries || []).length ? ((a.injuries[0].type || a.injuries[0].status || '') + '') : '',
+      });
+    });
+  });
+  return rows;
+}
+
+async function loadRoster(teamId) {
+  currentTeamId = String(teamId); currentView = 'roster';
+  const team = teamsById.get(String(teamId));
+  setTeamBadge(team);
+  $('find').value = '';
+  say('Loading roster…');
+  let rows;
+  try {
+    rows = slimRoster(await jc(`${SITE}/teams/${teamId}/roster`));
+  } catch (e) { say('Could not load that roster: ' + e.message, true); return; }
+  say('');
+  rosterState = { team, rows };
+  sortState = { table: 'roster', key: null, dir: 1 };
+  paintRoster();
+}
+
+function sortRows(rows, key, dir) {
+  if (!key) return rows;
+  return [...rows].sort((a, b) => {
+    let av = a[key], bv = b[key];
+    if (key === 'number') {
+      av = av === '' || av == null ? null : +av; bv = bv === '' || bv == null ? null : +bv;
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1; if (bv === null) return -1;
+      return (av - bv) * dir;
+    }
+    av = (av || '').toString().toLowerCase(); bv = (bv || '').toString().toLowerCase();
+    if (av < bv) return -1 * dir; if (av > bv) return 1 * dir; return 0;
+  });
+}
+
+function sortableTh(label, key, tbl) {
+  const th = el('th', null, label);
+  th.dataset.key = key; th.dataset.tbl = tbl;
+  if (sortState.table === tbl && sortState.key === key) th.classList.add(sortState.dir === 1 ? 'sort-asc' : 'sort-desc');
+  return th;
+}
+
+function paintRoster() {
+  if (!rosterState) return;
+  const { team, rows } = rosterState;
+  currentIndex = new Map();
+  rows.forEach(r => currentIndex.set(r.id, {
+    id: r.id, name: r.name, pos: r.pos, team: team ? team.name : '',
+    teamAbbr: team ? team.abbr : '', teamId: team ? team.id : null,
+  }));
+
+  const table = el('table', 'players');
+  const thead = el('thead'); const hr = el('tr');
+  hr.appendChild(sortableTh('#', 'number', 'roster'));
+  hr.appendChild(sortableTh('Name', 'name', 'roster'));
+  hr.appendChild(sortableTh('Pos', 'pos', 'roster'));
+  hr.appendChild(sortableTh('Status', 'group', 'roster'));
+  thead.appendChild(hr); table.appendChild(thead);
+  const tbody = el('tbody');
+  const active = sortState.table === 'roster' ? sortState : null;
+
+  GROUP_ORDER.forEach(gk => {
+    const [label, badgeCls] = GROUP_LABELS[gk] || [gk.toUpperCase(), 'res'];
+    let g = rows.filter(r => r.group === gk);
+    g = active && active.key
+      ? sortRows(g, active.key, active.dir)
+      : g.sort((a, b) => posRank(a.pos) - posRank(b.pos) || a.name.localeCompare(b.name));
+    if (!g.length) return;
+    const trG = el('tr', 'group');
+    const tdG = el('td', null, `${label} (${g.length})`); tdG.colSpan = 4;
+    trG.appendChild(tdG); tbody.appendChild(trG);
+    g.forEach(r => {
+      const tr = el('tr'); tr.dataset.pid = r.id;
+      tr.appendChild(el('td', 'num', r.number));
+      tr.appendChild(el('td', 'name', r.name));
+      tr.appendChild(el('td', null, r.pos));
+      const badgeText = r.injury || (badgeCls === 'active' ? 'Active' : badgeCls === 'out' ? 'Out' : 'Practice Squad');
+      tr.appendChild(el('td', null, '')).innerHTML =
+        `<span class="badge ${r.injury ? 'out' : badgeCls}">${badgeText}</span>`;
+      tbody.appendChild(tr);
+    });
+  });
+  table.appendChild(tbody);
+  addTable(`${team ? team.name : 'Team'} Roster`, table);
+}
+
+function addTable(title, table, note) {
+  const out = $('out'); out.innerHTML = '';
+  out.appendChild(el('h2', null, title));
+  if (note) out.appendChild(el('div', 'metanote', note));
+  if (table) { const w = el('div', 'wrap'); w.appendChild(table); out.appendChild(w); }
+}
+
+// =====================================================================================
+// Global search — progressive league-wide index
+// =====================================================================================
+// The baseball tool gets a whole-league player index in one call. ESPN has no equivalent: its
+// league-wide athlete list is 20k entries deep, paged 25 at a time, and carries no team or
+// position — useless for a search table with Pos and Team columns. So the index is built from
+// the 32 team rosters instead, in the background, a few at a time: the Giants land first so the
+// page is usable immediately, and search works against whatever has arrived so far rather than
+// blocking on all 32.
+
+let allPlayers = [];             // [{id,name,pos,number,teamId,teamName,teamAbbr}]
+let indexedTeams = new Set();
+let indexing = false;
+
+async function buildPlayerIndex() {
+  if (indexing) return;
+  indexing = true;
+  const ids = [String(HOME_TEAM_ID), ...[...teamsById.keys()].filter(id => +id !== HOME_TEAM_ID)];
+  const CONCURRENCY = 6;         // enough to finish quickly, gentle enough not to look like a scrape
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < ids.length) {
+      const id = ids[cursor++];
+      if (indexedTeams.has(id)) continue;
+      const team = teamsById.get(id);
+      try {
+        const rows = slimRoster(await jc(`${SITE}/teams/${id}/roster`));
+        rows.forEach(r => allPlayers.push({
+          id: r.id, name: r.name, pos: r.pos, number: r.number,
+          teamId: id, teamName: team ? team.name : '', teamAbbr: team ? team.abbr : '',
+        }));
+        indexedTeams.add(id);
+      } catch { /* one team failing shouldn't stop the index */ }
+      updateIndexNote();
+    }
+  };
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  indexing = false;
+  updateIndexNote();
+  // If the user typed while it was still filling, repaint against the finished index.
+  if (currentView === 'search' && $('find').value.trim()) renderSearchResults($('find').value);
+}
+
+function updateIndexNote() {
+  const n = indexedTeams.size;
+  const note = $('datanote');
+  if (!note) return;
+  note.innerHTML = n >= 32
+    ? 'Data <b>Live via ESPN</b>'
+    : `Data <b>Live via ESPN</b> · indexing ${n}/32`;
+}
+
+let currentIndex = new Map();
+let rosterState = null;
+let searchState = null;
+let sortState = { table: null, key: null, dir: 1 };
+
+function renderSearchResults(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) { searchState = null; renderDirectory($('division').value); return; }
+  currentView = 'search';
+  setTeamBadge(null);
+  const matches = allPlayers.filter(p => p.name.toLowerCase().includes(q));
+  say('');
+  const stillIndexing = indexedTeams.size < 32;
+  if (!matches.length) {
+    searchState = null;
+    addTable(`Search — "${query}"`, null, stillIndexing
+      ? `No matches yet — still indexing (${indexedTeams.size}/32 teams). Try again in a moment.`
+      : 'No players matched that search.');
+    return;
+  }
+
+  const LIMIT = 80;
+  const shown = matches.slice(0, LIMIT);
+  const byTeam = new Map();
+  shown.forEach(p => {
+    if (!byTeam.has(p.teamId)) byTeam.set(p.teamId, []);
+    byTeam.get(p.teamId).push(p);
+  });
+  const teamGroups = [...byTeam.entries()]
+    .map(([tid, players]) => ({ team: teamsById.get(tid), players }))
+    .sort((a, b) => (a.team ? a.team.name : '').localeCompare(b.team ? b.team.name : ''));
+
+  searchState = { query, teamGroups, total: matches.length, limit: LIMIT, stillIndexing };
+  sortState = { table: 'search', key: null, dir: 1 };
+  paintSearch();
+}
+
+function paintSearch() {
+  if (!searchState) return;
+  const { query, teamGroups, total, limit, stillIndexing } = searchState;
+  currentIndex = new Map();
+  const table = el('table', 'players');
+  const thead = el('thead'); const hr = el('tr');
+  hr.appendChild(sortableTh('#', 'number', 'search'));
+  hr.appendChild(sortableTh('Name', 'name', 'search'));
+  hr.appendChild(sortableTh('Pos', 'pos', 'search'));
+  hr.appendChild(sortableTh('Team', 'teamName', 'search'));
+  thead.appendChild(hr); table.appendChild(thead);
+  const tbody = el('tbody');
+  const active = sortState.table === 'search' ? sortState : null;
+  teamGroups.forEach(({ team, players }) => {
+    const trG = el('tr', 'group');
+    const tdG = el('td', null, team ? team.name : 'Unknown Team'); tdG.colSpan = 4;
+    trG.appendChild(tdG); tbody.appendChild(trG);
+    const rows = active && active.key ? sortRows(players, active.key, active.dir)
+                                      : [...players].sort((a, b) => a.name.localeCompare(b.name));
+    rows.forEach(p => {
+      currentIndex.set(p.id, { id: p.id, name: p.name, pos: p.pos, team: p.teamName,
+                               teamAbbr: p.teamAbbr, teamId: p.teamId });
+      const tr = el('tr'); tr.dataset.pid = p.id;
+      tr.appendChild(el('td', 'num', p.number));
+      tr.appendChild(el('td', 'name', p.name));
+      tr.appendChild(el('td', null, p.pos));
+      tr.appendChild(el('td', null, p.teamName));
+      tbody.appendChild(tr);
+    });
+  });
+  table.appendChild(tbody);
+  const notes = [];
+  if (total > limit) notes.push(`Showing first ${limit} of ${total} matches — refine to narrow it down.`);
+  if (stillIndexing) notes.push(`Still indexing (${indexedTeams.size}/32 teams) — more may appear.`);
+  addTable(`Search — "${query}"`, table, notes.join(' '));
+}
+
+// =====================================================================================
+// Stat vocabulary
+// =====================================================================================
+// ESPN hands back parallel arrays: `names` (machine keys, unique) and `labels` (display, and NOT
+// unique — YDS/AVG/TD each appear twice for a skill player, once for rushing and once for
+// receiving). So everything keys off `names`, and labels get disambiguated here.
+
+const NICE_LABEL = {
+  gamesPlayed:'GP',
+  completions:'CMP', passingAttempts:'ATT', passingYards:'PASS YDS', completionPct:'CMP%',
+  yardsPerPassAttempt:'Y/ATT', passingTouchdowns:'PASS TD', interceptions:'INT',
+  longPassing:'LNG PASS', sacks:'SACK', QBRating:'RTG', adjQBR:'QBR',
+  rushingAttempts:'CAR', rushingYards:'RUSH YDS', yardsPerRushAttempt:'Y/CAR',
+  rushingTouchdowns:'RUSH TD', longRushing:'LNG RUN', rushingFirstDowns:'RUSH FD',
+  receptions:'REC', receivingTargets:'TGTS', receivingYards:'REC YDS',
+  yardsPerReception:'Y/REC', receivingTouchdowns:'REC TD', longReception:'LNG REC',
+  fumbles:'FUM', fumblesLost:'FUM LOST', fumblesForced:'FF', fumblesRecovered:'FR',
+  fumblesRecoveredYards:'FR YDS',
+  totalTackles:'TOT', soloTackles:'SOLO', assistTackles:'AST', stuffs:'TFL', stuffYards:'TFL YDS',
+  kicksBlocked:'BLK', passesDefended:'PD',
+  interceptionYards:'INT YDS', avgInterceptionYards:'INT AVG', interceptionTouchdowns:'INT TD',
+  longInterception:'LNG INT',
+  punts:'PUNTS', puntYards:'PUNT YDS', grossAvgPuntYards:'AVG', netAvgPuntYards:'NET',
+  longPunt:'LNG', touchbacks:'TB', touchbackPct:'TB%', puntsInside20:'IN20', puntsInside20Pct:'IN20%',
+  puntReturns:'PR', puntReturnYards:'PR YDS', avgPuntReturnYards:'PR AVG',
+  kickReturns:'KR', kickReturnYards:'KR YDS', longKickReturn:'LNG KR',
+  fieldGoalPct:'FG%', longFieldGoalMade:'LNG FG', fieldGoalsMadeYardsAverage:'FG AVG',
+  totalKickingPoints:'PTS', totalPoints:'PTS', totalTouchdowns:'TD',
+  returnTouchdowns:'RET TD', totalTwoPointConvs:'2PT', kickExtraPoints:'XP', fieldGoals:'FG',
+  'fieldGoalsMade-fieldGoalAttempts':'FG',
+  'extraPointsMade-extraPointAttempts':'XP',
+  'fieldGoalsMade1_19-fieldGoalAttempts1_19':'FG 1-19',
+  'fieldGoalsMade20_29-fieldGoalAttempts20_29':'FG 20-29',
+  'fieldGoalsMade30_39-fieldGoalAttempts30_39':'FG 30-39',
+  'fieldGoalsMade40_49-fieldGoalAttempts40_49':'FG 40-49',
+  'fieldGoalsMade50-fieldGoalAttempts50':'FG 50+',
+};
+const labelFor = (name, fallback) => NICE_LABEL[name] || (fallback || name || '').trim();
+
+// ESPN's own label for a stat name, remembered the first time we see it — the fallback when
+// NICE_LABEL has no entry, so a category we've never met still renders a sensible header.
+const LABEL_HINT = {};
+
+// Longest-of, not sum-of.
+const MAX_STATS = new Set(['longPassing', 'longRushing', 'longReception', 'longInterception',
+  'longPunt', 'longFieldGoalMade', 'longKickReturn', 'longPuntReturn']);
+
+// Rate stats can't be added up, so they get recomputed from their components after the counting
+// stats have been summed. [numerator, denominator, kind, decimals]
+const DERIVED = {
+  completionPct:        ['completions', 'passingAttempts', 'pct', 1],
+  yardsPerPassAttempt:  ['passingYards', 'passingAttempts', 'ratio', 1],
+  yardsPerRushAttempt:  ['rushingYards', 'rushingAttempts', 'ratio', 1],
+  yardsPerReception:    ['receivingYards', 'receptions', 'ratio', 1],
+  avgInterceptionYards: ['interceptionYards', 'interceptions', 'ratio', 1],
+  grossAvgPuntYards:    ['puntYards', 'punts', 'ratio', 1],
+  touchbackPct:         ['touchbacks', 'punts', 'pct', 2],
+  puntsInside20Pct:     ['puntsInside20', 'punts', 'pct', 2],
+  avgPuntReturnYards:   ['puntReturnYards', 'puntReturns', 'ratio', 1],
+  fieldGoalPct:         ['fieldGoalsMade', 'fieldGoalAttempts', 'pct', 1],
+};
+
+// No way to reconstruct these from per-game rows, so a multi-game window just drops them rather
+// than showing a number that's quietly wrong. ESPN's own season/career totals still carry them.
+const UNAGGREGATABLE = new Set(['adjQBR', 'QBR', 'netAvgPuntYards', 'fieldGoalsMadeYardsAverage']);
+
+const num = v => {
+  if (v == null) return NaN;
+  const s = String(v).replace(/,/g, '').trim();
+  if (s === '' || s === '-' || s === '--') return NaN;
+  const n = parseFloat(s);
+  return isNaN(n) ? NaN : n;
+};
+// Thousands separator on the big counting stats, matching how ESPN (and every broadcast graphic)
+// writes them — a season passing total reads as 2,272, not 2272. Rate stats never get here.
+const fmtNum = n => {
+  if (!Number.isInteger(n)) return n.toFixed(1);
+  return Math.abs(n) >= 1000 ? n.toLocaleString('en-US') : String(n);
+};
+
+// NFL passer rating — the one derived stat with a formula rather than a ratio, and worth keeping
+// because it's the number people actually say out loud about a quarterback.
+function passerRating(cmp, att, yds, td, ints) {
+  if (!att) return null;
+  const clamp = x => Math.max(0, Math.min(2.375, x));
+  const a = clamp((cmp / att - 0.3) * 5);
+  const b = clamp((yds / att - 3) * 0.25);
+  const c = clamp((td / att) * 20);
+  const d = clamp(2.375 - (ints / att) * 25);
+  return ((a + b + c + d) / 6 * 100).toFixed(1);
+}
+
+// =====================================================================================
+// Game log — one fetch drives every multi-game timeframe
+// =====================================================================================
+// The gamelog payload already carries week, opponent, home/away and result per game, so Last 3,
+// Last 5, Home, Away, vs Division and vs a specific opponent are all filters over the same
+// response. Two requests per player, total (this plus career), against the baseball tool's one
+// per timeframe.
+
+async function fetchGameLog(pid, year) {
+  const d = await jc(`${WEB}/athletes/${pid}/gamelog?season=${year}`);
+  const names = d.names || [];
+  const labels = (d.labels || []).map(s => (s || '').trim());
+  const events = d.events || {};
+  const games = [];
+  (d.seasonTypes || []).forEach(stype => {
+    (stype.categories || []).forEach(cat => {
+      (cat.events || []).forEach(e => {
+        const meta = events[e.eventId] || {};
+        const opp = meta.opponent || {};
+        games.push({
+          eventId: e.eventId,
+          stats: e.stats || [],
+          week: meta.week,
+          date: meta.gameDate,
+          home: meta.atVs === 'vs',
+          result: meta.gameResult,
+          score: meta.score,
+          oppAbbr: opp.abbreviation || '',
+          oppName: opp.displayName || '',
+          seasonType: stype.displayName || '',
+        });
+      });
+    });
+  });
+  // ESPN returns newest-first inside a category, but not necessarily across season types, so
+  // sort it ourselves — "last 3 games" has to mean the actual last 3.
+  games.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+  // ESPN's own regular-season totals: authoritative, and they include the stats we can't derive.
+  let totals = null;
+  const reg = (d.seasonTypes || []).find(s => /regular/i.test(s.displayName || ''));
+  if (reg && (reg.categories || []).length) totals = (reg.categories[0] || {}).totals || null;
+
+  return { names, labels, games, totals };
+}
+
+// Turn a values array into a {name: rawString} map.
+const toMap = (names, vals) => {
+  const m = {};
+  names.forEach((n, i) => { m[n] = (vals || [])[i]; });
+  return m;
+};
+
+// Sum a set of per-game rows into one stat map, honouring max-of / derived / drop rules.
+// Compound "made-attempts" keys (the kicking ones, e.g. "8-8") are split into their two halves so
+// they can be summed and re-joined — and so fieldGoalPct has real components to derive from.
+function aggregate(names, rows) {
+  const sums = {};        // name -> number
+  const pairs = {};       // compound name -> [madeTotal, attTotal]
+  const maxes = {};
+
+  rows.forEach(vals => {
+    names.forEach((name, i) => {
+      const raw = (vals || [])[i];
+      if (raw == null) return;
+      if (name.includes('-')) {
+        const m = String(raw).match(/^(-?[\d.]+)\s*-\s*(-?[\d.]+)$/);
+        if (!m) return;
+        const [a, b] = [parseFloat(m[1]), parseFloat(m[2])];
+        if (!pairs[name]) pairs[name] = [0, 0];
+        pairs[name][0] += a; pairs[name][1] += b;
+        // expose the halves under their component names so DERIVED can find them
+        const [ln, rn] = name.split('-');
+        sums[ln] = (sums[ln] || 0) + a;
+        sums[rn] = (sums[rn] || 0) + b;
+        return;
+      }
+      const n = num(raw);
+      if (isNaN(n)) return;
+      if (MAX_STATS.has(name)) { maxes[name] = Math.max(maxes[name] ?? -Infinity, n); return; }
+      if (DERIVED[name] || UNAGGREGATABLE.has(name)) return;   // handled after / dropped
+      sums[name] = (sums[name] || 0) + n;
+    });
+  });
+
+  const out = {};
+  Object.entries(sums).forEach(([k, v]) => { out[k] = fmtNum(v); });
+  Object.entries(maxes).forEach(([k, v]) => { out[k] = fmtNum(v); });
+  Object.entries(pairs).forEach(([k, [a, b]]) => { out[k] = `${fmtNum(a)}-${fmtNum(b)}`; });
+
+  Object.entries(DERIVED).forEach(([name, [nk, dk, kind, dp]]) => {
+    if (!names.includes(name)) return;
+    const n = sums[nk], d = sums[dk];
+    if (n == null || !d) return;
+    out[name] = kind === 'pct' ? (n / d * 100).toFixed(dp) : (n / d).toFixed(dp);
+  });
+
+  if (names.includes('QBRating')) {
+    const r = passerRating(sums.completions || 0, sums.passingAttempts || 0,
+                           sums.passingYards || 0, sums.passingTouchdowns || 0, sums.interceptions || 0);
+    if (r != null) out.QBRating = r;
+  }
+  out.gamesPlayed = String(rows.length);
+  return out;
+}
+
+// =====================================================================================
+// Career
+// =====================================================================================
+// The /stats endpoint already gives per-category career `totals` alongside a season-by-season
+// breakdown, both with `names`. Nothing to aggregate by hand.
+
+async function fetchCareer(pid) {
+  const d = await jc(`${WEB}/athletes/${pid}/stats`);
+  const cats = d.categories || [];
+  const isScoring = c => c.name === 'scoring';
+  // Two different orders here, for two different reasons:
+  //  - merging values: 'scoring' first, so the specific categories overwrite the vaguer keys it
+  //    shares with them (its `fieldGoals` vs kicking's `fieldGoalsMade`).
+  //  - display: 'scoring' last, so a quarterback's card opens on his passing line instead of on
+  //    the 0 FG / 0 XP rows that scoring contributes for everyone who isn't a kicker.
+  const mergeOrder = [...cats].sort((a, b) => (isScoring(a) ? -1 : isScoring(b) ? 1 : 0));
+  const nameOrder = [...cats.filter(c => !isScoring(c)), ...cats.filter(isScoring)];
+
+  const names = [];
+  nameOrder.forEach(c => (c.names || []).forEach((n, i) => {
+    if (!names.includes(n)) names.push(n);
+    LABEL_HINT[n] = LABEL_HINT[n] || ((c.labels || [])[i] || '').trim();
+  }));
+
+  const totals = {};
+  const seasons = new Map();     // year -> {year, team, map}
+  mergeOrder.forEach(c => {
+    const cn = c.names || [];
+    if (c.totals) Object.assign(totals, toMap(cn, c.totals));
+    (c.statistics || []).forEach(s => {
+      const yr = s.season && s.season.year;
+      if (!yr) return;
+      if (!seasons.has(yr)) seasons.set(yr, { year: yr, team: s.teamSlug || '', map: {} });
+      Object.assign(seasons.get(yr).map, toMap(cn, s.stats));
+    });
+  });
+  return { names, totals, seasons: [...seasons.values()].sort((a, b) => b.year - a.year) };
+}
+
+// =====================================================================================
+// Position groups + which stats make the on-air bar
+// =====================================================================================
+// The bar gets a curated handful, not everything: seven cells is the most that reads at a glance
+// from a couch. Anything in the spec that the player has no value for is skipped, and if a spec
+// comes up short the remaining cells are filled from whatever else the position returned.
+
+const POS_GROUP = pos => {
+  const p = (pos || '').toUpperCase();
+  if (p === 'QB') return 'qb';
+  if (['RB', 'FB', 'HB'].includes(p)) return 'rb';
+  if (['WR', 'TE'].includes(p)) return 'wr';
+  if (['PK', 'K'].includes(p)) return 'k';
+  if (p === 'P') return 'p';
+  if (['OT', 'G', 'C', 'OG', 'OC', 'OL', 'T', 'LS'].includes(p)) return 'ol';
+  return 'def';
+};
+
+const CELL_SPEC = {
+  qb:  ['@cmpAtt', 'passingYards', 'passingTouchdowns', 'interceptions', 'completionPct', 'QBRating'],
+  rb:  ['rushingAttempts', 'rushingYards', 'yardsPerRushAttempt', 'rushingTouchdowns', 'longRushing', 'receptions', 'receivingYards'],
+  wr:  ['receptions', 'receivingTargets', 'receivingYards', 'yardsPerReception', 'receivingTouchdowns', 'longReception'],
+  def: ['totalTackles', 'soloTackles', 'sacks', 'stuffs', 'interceptions', 'passesDefended', 'fumblesForced'],
+  k:   ['fieldGoalsMade-fieldGoalAttempts', 'fieldGoalPct', 'longFieldGoalMade', 'extraPointsMade-extraPointAttempts', 'totalKickingPoints'],
+  p:   ['punts', 'grossAvgPuntYards', 'netAvgPuntYards', 'puntsInside20', 'longPunt'],
+  ol:  ['gamesPlayed'],
+};
+
+// Synthetic cells — a pair of stats that reads better fused than as two boxes.
+const SYNTHETIC = {
+  '@cmpAtt': (m) => {
+    const c = m.completions, a = m.passingAttempts;
+    return (c != null && a != null) ? { label: 'CMP-ATT', value: `${c}/${a}` } : null;
+  },
+};
+
+function buildCells(group, map, names) {
+  const spec = CELL_SPEC[group] || [];
+  const cells = [];
+  const used = new Set();
+  spec.forEach(key => {
+    if (cells.length >= 7) return;
+    if (key.startsWith('@')) {
+      const s = SYNTHETIC[key] && SYNTHETIC[key](map);
+      if (s) { cells.push([s.label, s.value]); used.add('completions'); used.add('passingAttempts'); }
+      return;
+    }
+    const v = map[key];
+    if (v == null || v === '' || v === '-') return;
+    cells.push([labelFor(key, LABEL_HINT[key]), v]);
+    used.add(key);
+  });
+  // Spec came up short (an unusual position, or a stat line with holes) — top up from whatever
+  // else this player actually has, so the bar is never a lonely two cells.
+  if (cells.length < 4) {
+    (names || []).forEach(n => {
+      if (cells.length >= 6 || used.has(n) || UNAGGREGATABLE.has(n)) return;
+      if (n === 'gamesPlayed') return;
+      const v = map[n];
+      if (v == null || v === '' || v === '-' || v === '0') return;
+      cells.push([labelFor(n, LABEL_HINT[n]), v]);
+      used.add(n);
+    });
+  }
+  return cells;
+}
+
+// =====================================================================================
+// Player modal
+// =====================================================================================
+
+const TF = [
+  ['season', 'FULL SEASON'],
+  ['last3',  'LAST 3'],
+  ['last5',  'LAST 5'],
+  ['home',   'HOME'],
+  ['away',   'AWAY'],
+  ['div',    'VS DIVISION'],
+  ['opp',    'VS OPPONENT'],
+  ['career', 'CAREER'],
+];
+
+let modalPid = null, modalRow = null, modalTf = 'season';
+let modalLog = null, modalCareer = null;
+let modalMap = null, modalNames = null, modalLabel = '', modalSub = '';
+let modalOpp = '';
+
+async function openPlayerModal(pid) {
+  const row = currentIndex.get(String(pid));
+  if (!row) return;
+  modalPid = String(pid); modalRow = row; modalTf = 'season'; modalOpp = '';
+  modalLog = modalCareer = null;
+  $('modalDlNote').textContent = '';
+  $('modalHeadshot').src = headshotURL(pid);
+  $('modalHeadshot').onerror = function () { this.style.visibility = 'hidden'; };
+  $('modalHeadshot').style.visibility = 'visible';
+  $('modalName').textContent = row.name;
+  $('modalSub').textContent = [row.pos, row.team].filter(Boolean).join(' · ');
+  $('modalBackdrop').hidden = false;
+  paintTfPills();
+  await loadModalStats();
+}
+
+function paintTfPills() {
+  const box = $('tfPills'); box.innerHTML = '';
+  TF.forEach(([key, label]) => {
+    const b = el('button', 'tf-pill' + (key === modalTf ? ' on' : ''), label);
+    b.type = 'button';
+    b.onclick = () => { modalTf = key; paintTfPills(); loadModalStats(); };
+    box.appendChild(b);
+  });
+}
+
+function tfLabel(tf, year) {
+  switch (tf) {
+    case 'season': return `${year} SEASON`;
+    case 'last3':  return 'LAST 3 GAMES';
+    case 'last5':  return 'LAST 5 GAMES';
+    case 'home':   return `${year} AT HOME`;
+    case 'away':   return `${year} ON THE ROAD`;
+    case 'div':    return `${year} VS DIVISION`;
+    case 'opp':    return modalOpp ? `${year} VS ${modalOpp}` : `${year} VS OPPONENT`;
+    case 'career': return 'CAREER';
+    default:       return String(tf).toUpperCase();
+  }
+}
+
+// Which games a timeframe covers. Everything except Full Season and Career is a filter here.
+function gamesFor(tf, log, row) {
+  const g = log.games || [];
+  const myDiv = DIV_OF[(row.teamAbbr || '').toUpperCase()];
+  switch (tf) {
+    case 'last3': return g.slice(0, 3);
+    case 'last5': return g.slice(0, 5);
+    case 'home':  return g.filter(x => x.home);
+    case 'away':  return g.filter(x => !x.home);
+    case 'div':   return myDiv ? g.filter(x => {
+      const od = DIV_OF[(x.oppAbbr || '').toUpperCase()];
+      return od && od.short === myDiv.short;
+    }) : [];
+    case 'opp':   return modalOpp ? g.filter(x => x.oppAbbr === modalOpp) : [];
+    default:      return g;
+  }
+}
+
+function paintOppSelect(log) {
+  const row = $('oppRow'), sel = $('oppSelect');
+  const show = modalTf === 'opp';
+  row.hidden = !show;
+  if (!show) return;
+  const opps = [...new Set((log.games || []).map(g => g.oppAbbr).filter(Boolean))].sort();
+  if (!modalOpp && opps.length) modalOpp = opps[0];
+  sel.innerHTML = opps.length
+    ? opps.map(a => `<option value="${a}"${a === modalOpp ? ' selected' : ''}>${a}</option>`).join('')
+    : '<option value="">no games</option>';
+}
+
+function statGrid(pairs, highlight) {
+  const hi = new Set((highlight || []).map(([k]) => k));
+  return `<div class="stat-grid">` + pairs.map(([k, v]) =>
+    `<div class="cell${hi.has(k) ? ' pick' : ''}"><div class="v">${v != null && v !== '' ? v : '–'}</div>` +
+    `<div class="k">${k}</div></div>`).join('') + `</div>`;
+}
+
+function gameLogTable(games) {
+  if (!games.length) return '';
+  const rows = games.slice(0, 6).map(g =>
+    `<tr><td>${g.week ? 'WK ' + g.week : ''}</td><td>${g.home ? 'vs' : '@'} ${g.oppAbbr}</td>` +
+    `<td class="${g.result === 'W' ? 'w' : g.result === 'L' ? 'l' : ''}">${g.result || ''} ${g.score || ''}</td></tr>`).join('');
+  return `<table class="gamelog"><thead><tr><th>Week</th><th>Opp</th><th>Result</th></tr></thead>` +
+         `<tbody>${rows}</tbody></table>`;
+}
+
+async function loadModalStats() {
+  const pid = modalPid, row = modalRow, tf = modalTf;
+  const year = $('season').value;
+  const group = POS_GROUP(row.pos);
+  $('modalBody').innerHTML = `<div class="modal-empty">Loading ${tfLabel(tf, year).toLowerCase()}…</div>`;
+  $('modalSend').hidden = true;
+
+  try {
+    if (tf === 'career') {
+      if (!modalCareer) modalCareer = await fetchCareer(pid);
+    } else if (!modalLog) {
+      modalLog = await fetchGameLog(pid, year);
+    }
+  } catch (e) {
+    if (modalPid !== pid || modalTf !== tf) return;
+    $('modalBody').innerHTML = `<div class="modal-empty">Could not load stats: ${e.message}</div>`;
+    return;
+  }
+  if (modalPid !== pid || modalTf !== tf) return;    // moved on mid-flight
+
+  if (group === 'ol') {
+    modalMap = null;
+    $('modalBody').innerHTML = `<div class="modal-empty">Offensive line — the NFL doesn't track individual stats for this position.</div>`;
+    updateSendBtn();
+    return;
+  }
+
+  let map, names, sub = '', windowGames = [];
+  if (tf === 'career') {
+    names = modalCareer.names; map = modalCareer.totals || {};
+    const yrs = modalCareer.seasons.length;
+    sub = `${map.gamesPlayed || '?'} GP · ${yrs} SEASON${yrs === 1 ? '' : 'S'}`;
+  } else {
+    names = modalLog.names;
+    paintOppSelect(modalLog);
+    if (tf === 'season') {
+      map = modalLog.totals ? toMap(names, modalLog.totals) : aggregate(names, (modalLog.games || []).map(g => g.stats));
+      const gp = (modalLog.games || []).filter(g => /regular/i.test(g.seasonType)).length;
+      map.gamesPlayed = map.gamesPlayed || String(gp);
+      sub = `${map.gamesPlayed} GP`;
+      windowGames = modalLog.games || [];
+    } else {
+      windowGames = gamesFor(tf, modalLog, row);
+      map = aggregate(names, windowGames.map(g => g.stats));
+      sub = `${windowGames.length} G`;
+    }
+  }
+
+  modalMap = map; modalNames = names; modalLabel = tfLabel(tf, year); modalSub = sub;
+
+  const noData = !names || !names.length ||
+                 (tf !== 'career' && tf !== 'season' && !windowGames.length) ||
+                 (tf === 'career' && !Object.keys(map).length);
+  if (noData) {
+    const why = tf === 'career'
+      ? 'No career stats on record for this player.'
+      : !names || !names.length
+        ? `No ${year} stats for this player — they may not have played this season.`
+        : `No games in this filter for ${year}.`;
+    $('modalBody').innerHTML = `<div class="modal-empty">${why}</div>`;
+    modalMap = null;
+    updateSendBtn();
+    return;
+  }
+
+  const cells = buildCells(group, map, names);
+  // Full grid of everything the position returned, with the on-air picks outlined.
+  const all = names.filter(n => n !== 'gamesPlayed' && !(tf !== 'season' && tf !== 'career' && UNAGGREGATABLE.has(n)))
+    .map(n => [labelFor(n, LABEL_HINT[n]), map[n]])
+    .filter(([, v]) => v != null && v !== '');
+
+  $('modalBody').innerHTML =
+    `<div class="modal-section"><h3>${modalLabel} · ${sub}</h3>` +
+    (cells.length ? `<div class="modal-hitline">Bar shows: ${cells.map(([k]) => k).join(' · ')}</div>` : '') +
+    statGrid(all, cells) + `</div>` +
+    (windowGames.length && tf !== 'season' ? `<div class="modal-section"><h3>Games in this filter</h3>${gameLogTable(windowGames)}</div>` : '');
+
+  updateSendBtn();
+}
+
+function closeModal() { $('modalBackdrop').hidden = true; }
+
+// =====================================================================================
+// The stat line that a Send would put on air
+// =====================================================================================
+
+function graphicData() {
+  if (!modalMap || !modalRow) return null;
+  const cells = buildCells(POS_GROUP(modalRow.pos), modalMap, modalNames);
+  if (!cells.length) return null;
+  return { label: modalLabel, hitLine: modalSub, cells };
+}
+
+// =====================================================================================
+// On air
+// =====================================================================================
+
+let onAirPid = null;
+
+function pushOnAir(pid, row, data) {
+  if (!row || !data) return;
+  onAirPid = String(pid);
+  const payload = { pid: String(pid), name: row.name, pos: row.pos, team: row.team, data };
+  try { localStorage.setItem(LT_KEY, JSON.stringify({ ...payload, ts: Date.now() })); } catch {}
+  if (ltChannel) ltChannel.postMessage(payload);
+  publishTopic(payload);
+  updateOnAirUI(payload);
+}
+
+function clearOnAir() {
+  onAirPid = null; onAirKey = null;
+  try { localStorage.removeItem(LT_KEY); } catch {}
+  if (ltChannel) ltChannel.postMessage({ clear: true });
+  publishTopic(null);
+  updateOnAirUI(null);
+  if (!$('modalBackdrop').hidden) updateSendBtn();   // flip "● On Air" back to "▶ Send to OBS"
+}
+
+function updateOnAirUI(payload) {
+  const box = $('onair'); if (!box) return;
+  box.hidden = !payload;
+  if (payload) $('onairText').innerHTML = `On air: <b>${payload.name}</b> · ${payload.data.label}`;
+}
+
+// What's currently selected in the modal, as a comparable key — lets the Send button say whether
+// this exact line is the one already on screen.
+const liveKey = () => `${modalPid}|${modalTf}|${modalTf === 'opp' ? modalOpp : ''}`;
+let onAirKey = null;
+
+function updateSendBtn() {
+  const btn = $('modalSend');
+  if (!btn) return;
+  const has = !!graphicData();
+  btn.hidden = !has;
+  const isLive = has && onAirKey === liveKey() && String(onAirPid) === String(modalPid);
+  btn.textContent = isLive ? '● On Air' : '▶ Send to OBS';
+  btn.classList.toggle('live', isLive);
+}
+
+// Nothing reaches OBS until Send is pressed. Browsing players and flipping through timeframes is
+// therefore always safe mid-show: the bar holds whatever was last sent, so the producer can go
+// look something up on air without it appearing on screen behind them.
+function sendToObs() {
+  const data = graphicData();
+  const note = $('modalDlNote');
+  if (!data || !modalRow) {
+    if (note) note.textContent = 'Nothing to send for this timeframe.';
+    return;
+  }
+  pushOnAir(modalPid, modalRow, data);
+  onAirKey = liveKey();
+  updateSendBtn();
+  if (note) note.textContent = 'Sent to OBS ✓';
+}
+
+// matches the CSS transition on .lt-bar, so a player-to-player swap fades the old one fully out
+// before the new content is painted and faded in — never an instant content pop
+const LT_FADE_MS = 350;
+let ltFadeTimer = null, ltVisible = false;
+
+function paintOnAirBar(payload) {
+  const { name, pos, team, data } = payload;
+  const hs = $('ltHeadshot');
+  hs.src = headshotURL(payload.pid);
+  hs.style.visibility = 'visible';
+  hs.onerror = function () { this.style.visibility = 'hidden'; };
+  $('ltName').textContent = (name || '').toUpperCase();
+  $('ltSub').textContent = [pos, team].filter(Boolean).join('  ·  ').toUpperCase();
+  const hitEl = $('ltHitline');
+  const splitText = data.label ? data.label.toUpperCase() : '';
+  const subText = data.hitLine ? data.hitLine.toUpperCase() : '';
+  hitEl.innerHTML = splitText ? `<span class="split">${splitText}</span>${subText ? '  ·  ' + subText : ''}` : '';
+  hitEl.style.display = splitText ? '' : 'none';
+  $('ltCells').innerHTML = data.cells.map(([label, value]) =>
+    `<div class="lt-cell"><div class="v">${value}</div><div class="k">${label}</div></div>`).join('');
+  sizeCells(data.cells.length);
+  $('ltBar').classList.add('lt-visible');
+  ltVisible = true;
+}
+
+function renderOnAirBar(payload) {
+  const bar = $('ltBar');
+  if (!bar) return;
+  clearTimeout(ltFadeTimer);
+  if (!payload) {
+    bar.classList.remove('lt-visible');   // fades out; content stays underneath
+    ltVisible = false;
+    return;
+  }
+  if (ltVisible) {
+    bar.classList.remove('lt-visible');
+    ltFadeTimer = setTimeout(() => paintOnAirBar(payload), LT_FADE_MS);
+  } else {
+    paintOnAirBar(payload);
+  }
+}
+
+// Shrinks each stat cell (width + font) to whatever fits in one row — mirrors the shrink-to-fit
+// the canvas export does, so the live bar never wraps no matter how many cells a timeframe adds.
+function sizeCells(n) {
+  const wrap = $('ltCells');
+  if (!wrap || !n) return;
+  const avail = wrap.clientWidth || n * 150;
+  const w = Math.max(64, Math.min(150, Math.floor(avail / n)));
+  const tight = w < 130, veryTight = w < 90;
+  const valueFs = veryTight ? 46 : tight ? 60 : 76;
+  const keyFs = veryTight ? 12 : tight ? 14 : 17;
+  wrap.querySelectorAll('.lt-cell').forEach(cell => {
+    cell.style.width = w + 'px';
+    const v = cell.querySelector('.v'), k = cell.querySelector('.k');
+    if (k) k.style.fontSize = keyFs + 'px';
+    if (!v) return;
+    // Per-cell shrink to fit: a wide value ("2,272", "16.5", "8-8") at this type size can outrun
+    // its cell, and the cell clips rather than wraps — which would silently cut a digit off a
+    // number on air. Step this one cell down until it fits; its neighbours keep the full size.
+    // measured against .v's own content box, so the cell's padding stays honoured
+    let fs = valueFs;
+    v.style.fontSize = fs + 'px';
+    while (fs > 24 && v.scrollWidth > v.clientWidth) v.style.fontSize = (fs -= 2) + 'px';
+  });
+}
+
+// ---- display side ----------------------------------------------------------------------
+// One RTDB listener. The SDK owns the socket, reconnects on its own, and replays the stored
+// value on connect — so an OBS Browser Source refreshed mid-show comes straight back up with
+// whatever is currently on air, and a wifi blip holds the last frame instead of blanking.
+function initDisplay() {
+  if (TOPIC && _db) {
+    onAirRef().on('value', snap => {
+      const s = snap.val();
+      renderOnAirBar(s && !s.clear && s.pid ? s : null);
+    }, () => { /* permission/network error — hold the last frame */ });
+    return;
+  }
+  // No room given: same-browser fallback for a second-window / window-capture setup.
+  try {
+    const cached = JSON.parse(localStorage.getItem(LT_KEY) || 'null');
+    if (cached) renderOnAirBar(cached);
+  } catch {}
+  if (ltChannel) ltChannel.onmessage = e => renderOnAirBar(e.data && e.data.clear ? null : e.data);
+  window.addEventListener('storage', e => {
+    if (e.key !== LT_KEY) return;
+    try { renderOnAirBar(e.newValue ? JSON.parse(e.newValue) : null); } catch {}
+  });
+}
+
+// =====================================================================================
+// Wiring
+// =====================================================================================
+
+const guard = fn => (...a) => Promise.resolve(fn(...a)).catch(e => say(e.message, true));
+
+let searchDebounce = null;
+$('find').oninput = () => {
+  clearTimeout(searchDebounce);
+  const q = $('find').value;
+  searchDebounce = setTimeout(() => guard(async () => renderSearchResults(q))(), 150);
+};
+
+$('division').onchange = () => {
+  const dv = $('division').value;
+  populateTeamSelect(dv);
+  $('team').value = '';
+  $('find').value = '';
+  renderDirectory(dv);
+};
+$('goHome').onclick = () => {
+  $('division').value = '';
+  populateTeamSelect('');
+  $('team').value = '';
+  $('find').value = '';
+  currentTeamId = null;
+  renderDirectory();
+};
+$('goGiants').onclick = () => {
+  $('find').value = '';
+  $('team').value = String(HOME_TEAM_ID);
+  guard(loadRoster)(HOME_TEAM_ID);
+};
+$('team').onchange = () => {
+  const id = $('team').value;
+  $('find').value = '';
+  if (id) guard(loadRoster)(id);
+  else renderDirectory($('division').value);
+};
+$('season').onchange = guard(async () => {
+  jCache.clear();                                  // season changed: gamelogs must refetch
+  modalLog = modalCareer = null;
+  if (currentView === 'roster' && currentTeamId) guard(loadRoster)(currentTeamId);
+  else if (currentView === 'search') renderSearchResults($('find').value);
+  else renderDirectory($('division').value);
+});
+
+$('out').onclick = e => {
+  const th = e.target.closest('thead th[data-key]');
+  if (th) {
+    const { key, tbl } = th.dataset;
+    const same = sortState.table === tbl && sortState.key === key;
+    sortState = { table: tbl, key, dir: same ? -sortState.dir : 1 };
+    if (tbl === 'roster') paintRoster(); else paintSearch();
+    return;
+  }
+  const tr = e.target.closest('tbody tr');
+  if (!tr || tr.classList.contains('group') || !tr.dataset.pid) return;
+  openPlayerModal(tr.dataset.pid);
+};
+$('oppSelect').onchange = () => { modalOpp = $('oppSelect').value; loadModalStats(); };
+$('modalClose').onclick = closeModal;
+$('modalSend').onclick = sendToObs;
+$('modalBackdrop').onclick = e => { if (e.target.id === 'modalBackdrop') closeModal(); };
+document.onkeydown = e => { if (e.key === 'Escape' && !$('modalBackdrop').hidden) closeModal(); };
+$('openDisplay').onclick = () => {
+  const url = new URL(location.href);
+  url.searchParams.set('display', '1');
+  if (TOPIC) url.searchParams.set('topic', TOPIC);
+  window.open(url.href, '_blank');
+};
+
+// The display URL has to be openable from the OBS machine, which rules out file:// — that path
+// only exists on this laptop. Say so up front rather than letting someone paste a dead link.
+const servedFromHost = /^https?:$/.test(location.protocol);
+function displayURL() {
+  return `${location.href.split(/[?#]/)[0]}?display=1&topic=${encodeURIComponent(TOPIC)}`;
+}
+
+function connectTopic() {
+  const t = $('topicInput').value.trim();
+  if (!t) { $('connHint').textContent = 'Enter a room name first.'; $('connHint').className = 'hint warn'; return; }
+  TOPIC = t;
+  try { localStorage.setItem(TOPIC_KEY, TOPIC); } catch {}
+  setConn(true);
+  // Republish whatever is already on air, so connecting mid-show brings the display straight up
+  // instead of leaving it blank until the next click.
+  let current = null;
+  try { current = JSON.parse(localStorage.getItem(LT_KEY) || 'null'); } catch {}
+  if (current && current.pid) publishTopic(current); else publishTopic(null);
+  updateConnHint();
+}
+
+function updateConnHint() {
+  const hint = $('connHint');
+  if (!TOPIC) {
+    hint.textContent = 'Pick any room name — both computers connect to the same one.';
+    hint.className = 'hint'; return;
+  }
+  if (!servedFromHost) {
+    hint.textContent = 'Opened from a file — the OBS computer can\'t load this URL. Serve it from GitHub Pages first.';
+    hint.className = 'hint warn'; return;
+  }
+  hint.textContent = 'Copy the display URL into the Browser Source on the OBS computer · 1920×1080';
+  hint.className = 'hint';
+}
+
+$('connectBtn').onclick = connectTopic;
+$('topicInput').onkeydown = e => { if (e.key === 'Enter') connectTopic(); };
+$('copyDisplayBtn').onclick = () => {
+  const btn = $('copyDisplayBtn'), url = displayURL();
+  copyText(url)
+    .then(() => { btn.textContent = 'Copied ✓'; })
+    .catch(() => { prompt('Copy this URL:', url); })
+    .finally(() => setTimeout(() => { btn.textContent = 'Copy Display URL'; }, 1600));
+};
+$('obsUrlCopy').onclick = () => {
+  const btn = $('obsUrlCopy');
+  copyText($('obsUrlText').textContent)
+    .then(() => { btn.textContent = 'Copied ✓'; })
+    .catch(() => { btn.textContent = 'Select it'; })
+    .finally(() => setTimeout(() => { btn.textContent = 'Copy'; }, 1600));
+};
+$('onairClear').onclick = clearOnAir;
+$('modalExitOnAir').onclick = () => {
+  clearOnAir();
+  $('modalDlNote').textContent = 'Removed from OBS ✓';
+};
+
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  return new Promise((resolve, reject) => {
+    const ta = el('textarea'); ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy') ? resolve() : reject(new Error('copy blocked')); }
+    catch (e) { reject(e); }
+    finally { ta.remove(); }
+  });
+}
+
+// The NFL season straddles the new year: ESPN's "season 2025" runs Sept 2025 → Feb 2026. So
+// before September, the newest season with any games in it is last calendar year's.
+function currentSeason() {
+  const d = new Date();
+  return d.getMonth() < 8 ? d.getFullYear() - 1 : d.getFullYear();
+}
+
+if (isDisplayMode) {
+  initDisplay();
+} else {
+  const cs = currentSeason();
+  $('season').innerHTML = Array.from({ length: cs - 1999 }, (_, i) => cs - i)
+    .map(y => `<option>${y}</option>`).join('');
+
+  // Reconnect to last show's room automatically; first run gets a suggested one so the only step
+  // is clicking Connect. The random tail matters — the room name is the whole address, so a
+  // guessable one is someone else's write access to your lower third.
+  let saved = '';
+  try { saved = localStorage.getItem(TOPIC_KEY) || ''; } catch {}
+  $('topicInput').value = saved || `tg-snapshot-${Math.random().toString(36).slice(2, 8)}`;
+  if (saved) { TOPIC = saved; setConn(true); }
+  else setConn(false);
+  updateConnHint();
+
+  guard(async () => {
+    say('Loading teams…');
+    await loadTeams();
+    say('');
+    // Open on the Giants — it's their show. The rest of the league is a click away.
+    $('team').value = String(HOME_TEAM_ID);
+    const nyg = divisions.find(dv => dv.short === 'NFC East');
+    if (nyg) $('division').value = 'NFC East';
+    await loadRoster(HOME_TEAM_ID);
+    buildPlayerIndex();          // fills the global search index in the background
+  })();
+}
+</script>
+</body>
+</html>
