@@ -139,12 +139,13 @@ DM Sans for body copy, DM Mono for labels.
   the modal says so rather than showing an empty grid.
 - **A player can legitimately be all zeros.** A special-teams-only back with four appearances and no
   touches will send a bar of zeros — that's the real stat line, not a bug.
-- **Everything goes through `site.web.api.espn.com`, on purpose.** ESPN exposes the same team and
-  roster data on `site.api.espn.com`, but that host doesn't reliably send an
-  `Access-Control-Allow-Origin` header, and a browser hard-fails the request when it's missing — so
-  the team list and every roster would break while stats kept working. The `web.api` host returns
-  the identical payload (verified byte-for-byte apart from a response timestamp) *and* the CORS
-  header. Don't switch the host back.
+- **The 32 teams are a static table in the file, not a fetch — and they have to be.** ESPN's
+  `/teams` endpoint sends no `Access-Control-Allow-Origin` header, on either of its hosts, while the
+  `/teams/{id}/roster` endpoint right next to it does. A browser hard-fails a cross-origin request
+  when that header is missing, so a page can't read `/teams` at all; it isn't something you can work
+  around client-side. Ids, abbreviations and division alignment are frozen anyway (last change was
+  the Commanders rename in 2022), and every id in the table is verified against ESPN. If a team ever
+  relocates or rebrands, edit `ALIGNMENT` at the top of the script.
 - **Responses are cached per URL for the session.** Clicking back to a timeframe you already looked
   at is instant; reload the page to force fresh numbers. Changing the season clears the cache.
 - **The 2026 season doesn't exist until September.** ESPN's "season 2025" runs Sept 2025 → Feb 2026,

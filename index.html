@@ -400,12 +400,11 @@
 const WORDMARK = "TALKIN' GIANTS";
 const HOME_TEAM_ID = 19;              // New York Giants (ESPN team id)
 
-// ESPN's public endpoints — no API key. Both paths go through site.web.api.espn.com deliberately:
-// it serves the site/v2 tree identically to site.api.espn.com (verified byte-for-byte apart from a
-// response timestamp) but it actually returns Access-Control-Allow-Origin. site.api.espn.com does
-// not send that header reliably, and a browser hard-fails the fetch when it's missing — which took
-// out the team list and every roster while leaving stats working, since those were already here.
-// Don't "simplify" the host back.
+// ESPN's public endpoints — no API key. Everything we actually fetch (rosters, game logs, career
+// stats) sends Access-Control-Allow-Origin, so this works straight off GitHub Pages with no proxy.
+// One host for both path trees; site.api.espn.com serves the same site/v2 data if this one ever
+// moves. The notable exception is /teams, which sends no CORS header on either host and so can't
+// be read from a browser at all — see the static team table below for how that's handled.
 const HOST = 'https://site.web.api.espn.com';
 const SITE = `${HOST}/apis/site/v2/sports/football/nfl`;
 const WEB  = `${HOST}/apis/common/v3/sports/football/nfl`;
@@ -494,56 +493,53 @@ function publishTopic(payload) {
 // =====================================================================================
 // Teams / divisions
 // =====================================================================================
-// ESPN's /teams response carries no conference or division, so the alignment is a static map.
-// It's been unchanged since 2002 realignment, which makes hardcoding it more reliable than
-// scraping standings for it — and one fewer request at load.
+// The 32 clubs are a static table, not a fetch. Two reasons, and the first is the hard one:
+//
+//   1. ESPN's /teams endpoint sends no Access-Control-Allow-Origin header — on either host, while
+//      its /roster sibling on the same host does send one. A browser hard-fails a cross-origin
+//      fetch when that header is missing, so a page simply cannot read /teams. Nothing to work
+//      around client-side; it has to not be called.
+//   2. The data is frozen anyway. Ids, abbreviations and division alignment haven't moved since
+//      the Commanders rename in 2022, and realignment before that was 2002.
+//
+// Ids and names below came from that endpoint (read server-side, where CORS doesn't apply). Team
+// colours aren't here because nothing uses them — the palette is the show's, not each club's.
+// [abbr, espnId, displayName]
 
 const ALIGNMENT = {
   AFC: {
-    East:  ['BUF', 'MIA', 'NE', 'NYJ'],
-    North: ['BAL', 'CIN', 'CLE', 'PIT'],
-    South: ['HOU', 'IND', 'JAX', 'TEN'],
-    West:  ['DEN', 'KC', 'LV', 'LAC'],
+    East:  [['BUF', 2, 'Buffalo Bills'], ['MIA', 15, 'Miami Dolphins'], ['NE', 17, 'New England Patriots'], ['NYJ', 20, 'New York Jets']],
+    North: [['BAL', 33, 'Baltimore Ravens'], ['CIN', 4, 'Cincinnati Bengals'], ['CLE', 5, 'Cleveland Browns'], ['PIT', 23, 'Pittsburgh Steelers']],
+    South: [['HOU', 34, 'Houston Texans'], ['IND', 11, 'Indianapolis Colts'], ['JAX', 30, 'Jacksonville Jaguars'], ['TEN', 10, 'Tennessee Titans']],
+    West:  [['DEN', 7, 'Denver Broncos'], ['KC', 12, 'Kansas City Chiefs'], ['LV', 13, 'Las Vegas Raiders'], ['LAC', 24, 'Los Angeles Chargers']],
   },
   NFC: {
-    East:  ['DAL', 'NYG', 'PHI', 'WSH'],
-    North: ['CHI', 'DET', 'GB', 'MIN'],
-    South: ['ATL', 'CAR', 'NO', 'TB'],
-    West:  ['ARI', 'LAR', 'SF', 'SEA'],
+    East:  [['DAL', 6, 'Dallas Cowboys'], ['NYG', 19, 'New York Giants'], ['PHI', 21, 'Philadelphia Eagles'], ['WSH', 28, 'Washington Commanders']],
+    North: [['CHI', 3, 'Chicago Bears'], ['DET', 8, 'Detroit Lions'], ['GB', 9, 'Green Bay Packers'], ['MIN', 16, 'Minnesota Vikings']],
+    South: [['ATL', 1, 'Atlanta Falcons'], ['CAR', 29, 'Carolina Panthers'], ['NO', 18, 'New Orleans Saints'], ['TB', 27, 'Tampa Bay Buccaneers']],
+    West:  [['ARI', 22, 'Arizona Cardinals'], ['LAR', 14, 'Los Angeles Rams'], ['SF', 25, 'San Francisco 49ers'], ['SEA', 26, 'Seattle Seahawks']],
   },
 };
 
-// abbr -> {conf, div, short} e.g. NYG -> {conf:'NFC', div:'East', short:'NFC East'}
-const DIV_OF = {};
-Object.entries(ALIGNMENT).forEach(([conf, divs]) =>
-  Object.entries(divs).forEach(([div, abbrs]) =>
-    abbrs.forEach(a => { DIV_OF[a] = { conf, div, short: `${conf} ${div}` }; })));
-
-let teamsById = new Map();       // id (string) -> {id, abbr, name, color, altColor, div}
+const DIV_OF = {};               // abbr -> {conf, div, short} e.g. NYG -> {..., short:'NFC East'}
+let teamsById = new Map();       // id (string) -> {id, abbr, name, div}
 let divisions = [];              // [{conf, div, short, teams:[...]}] in display order
 let currentTeamId = null;
 let currentView = 'directory';
 
-async function loadTeams() {
-  const d = await jc(`${SITE}/teams`);
-  const raw = (((d.sports || [])[0] || {}).leagues || [])[0] || {};
-  const teams = (raw.teams || []).map(x => x.team).filter(Boolean).map(t => ({
-    id: String(t.id),
-    abbr: t.abbreviation,
-    name: t.displayName,
-    short: t.shortDisplayName,
-    color: t.color ? '#' + t.color : null,
-    altColor: t.alternateColor ? '#' + t.alternateColor : null,
-    div: DIV_OF[t.abbreviation] || null,
-  }));
-  teamsById = new Map(teams.map(t => [t.id, t]));
-
+function buildTeams() {
   divisions = [];
+  teamsById = new Map();
   Object.entries(ALIGNMENT).forEach(([conf, divs]) =>
-    Object.entries(divs).forEach(([div, abbrs]) => {
-      const list = abbrs.map(a => teams.find(t => t.abbr === a)).filter(Boolean)
-        .sort((a, b) => a.name.localeCompare(b.name));
-      divisions.push({ conf, div, short: `${conf} ${div}`, teams: list });
+    Object.entries(divs).forEach(([div, rows]) => {
+      const short = `${conf} ${div}`;
+      const list = rows.map(([abbr, id, name]) => {
+        DIV_OF[abbr] = { conf, div, short };
+        const t = { id: String(id), abbr, name, div: { conf, div, short } };
+        teamsById.set(t.id, t);
+        return t;
+      }).sort((a, b) => a.name.localeCompare(b.name));
+      divisions.push({ conf, div, short, teams: list });
     }));
 
   $('division').innerHTML = '<option value="">All Divisions</option>' +
@@ -1671,8 +1667,7 @@ if (isDisplayMode) {
   updateConnHint();
 
   guard(async () => {
-    say('Loading teams…');
-    await loadTeams();
+    buildTeams();               // static table — no request, so the directory is ready immediately
     say('');
     // Open on the Giants — it's their show. The rest of the league is a click away.
     $('team').value = String(HOME_TEAM_ID);
