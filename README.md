@@ -41,8 +41,9 @@ immediately) and the header shows `indexing n/32` while it fills.
 | Last 3 / Last 5 | the most recent 3 or 5 games played |
 | Home / Away | that season, split by venue |
 | Vs Division | games against the other three teams in their division |
-| Vs Opponent | one specific opponent, picked from a dropdown of teams they actually faced |
-| Career | career totals plus a season-by-season breakdown |
+| Vs Opponent | one specific opponent this season, picked from a dropdown of teams they actually faced |
+| Career Total | ESPN's career totals (regular season) |
+| Career Vs Team | every meeting with one club across their whole career |
 
 Stats are position-aware, because ESPN's response is: a quarterback comes back with
 CMP/ATT/YDS/TD/INT/RTG, a linebacker with TOT/SOLO/SACK/TFL/INT/PD, a kicker with FG/FG%/LNG/XP/PTS.
@@ -133,6 +134,19 @@ DM Sans for body copy, DM Mono for labels.
 - **QBR is missing from the aggregated windows.** It can't be reconstructed from per-game rows, so
   those views drop it rather than show a number that's quietly wrong. Full Season and Career still
   have it, because those come from ESPN directly. Same for a punter's NET average.
+- **Pro Bowls are excluded.** ESPN files the Pro Bowl in the game log as a *Postseason* game with
+  the opponent listed as `AFC` or `NFC`. Left in, an all-star game lands inside "Last 3", inflates
+  career totals, and turns up as a selectable opponent called AFC. Any game whose opponent isn't one
+  of the 32 clubs is dropped, which catches that without touching real playoff games. Verified on
+  Brian Burns: 114 games kept, 2 Pro Bowls dropped, and the career total then lands on ESPN's own
+  384 tackles / 71 sacks exactly.
+- **Career Total is regular season; Career Vs Team includes playoff meetings.** ESPN's career totals
+  exclude the postseason, but a career head-to-head is more useful with playoff games in it, so the
+  two pills can differ for a player with a postseason history.
+- **Career Vs Team costs one request per season played** — a ten-year veteran means ten game-log
+  fetches, run in parallel and cached for the session, so it's paid once per player. Stats are
+  matched by name rather than column position there, since a player's stat columns can differ
+  between seasons.
 - **Longest-of stats take the max, not the sum** — LNG PASS over three games is the longest of the
   three, not their total.
 - **Offensive linemen have no card.** The NFL doesn't track individual stats for the position, and

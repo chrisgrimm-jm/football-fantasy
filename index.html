@@ -148,7 +148,7 @@
     display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
   .modal-backdrop[hidden]{display:none}
   .modal{background:var(--surface3);border:1px solid var(--border2);border-radius:var(--radius-lg);
-    max-width:520px;width:100%;max-height:88vh;overflow:auto;padding:24px;position:relative;
+    max-width:580px;width:100%;max-height:88vh;overflow:auto;padding:24px;position:relative;
     box-shadow:0 24px 70px rgba(0,0,0,.6)}
   .modal-close{position:absolute;top:12px;right:12px;background:none;border:1px solid var(--border);
     color:var(--text2);width:28px;height:28px;border-radius:50%;font-size:16px;line-height:1;
@@ -183,8 +183,8 @@
   .modal-export-btn.live{background:var(--green);border-color:var(--green);color:#00281a}
   .modal-export-btn.live:hover{background:#7ce9bd;border-color:#7ce9bd;color:#00281a}
   .modal-section{margin-bottom:18px}
-  .modal-section h3{font-family:var(--font-mono);font-size:9px;letter-spacing:.2em;
-    text-transform:uppercase;color:var(--label);margin:0 0 10px;opacity:.9;font-weight:400}
+  .modal-section h3{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--label);margin:0 0 10px;opacity:1;font-weight:500}
   .modal-line{font-family:var(--font-mono);font-size:15px;color:var(--white);margin-bottom:12px;
     letter-spacing:.02em}
   .modal-hitline{font-family:var(--font-display);font-weight:400;font-size:19px;letter-spacing:.08em;
@@ -200,10 +200,11 @@
   /* position of this stat on the bar, so the click order is visible */
   .stat-grid .cell .ord{position:absolute;top:3px;right:5px;font-family:var(--font-mono);
     font-size:8px;color:var(--accent);letter-spacing:.06em}
-  .stat-grid .cell .v{font-family:var(--font-display);font-weight:400;font-size:24px;line-height:1;
+  .stat-grid .cell .v{font-family:var(--font-display);font-weight:400;font-size:27px;line-height:1;
     color:var(--white);letter-spacing:.02em}
-  .stat-grid .cell .k{font-family:var(--font-mono);font-size:8px;color:var(--label);
-    text-transform:uppercase;letter-spacing:.14em;margin-top:6px;opacity:.9}
+  /* the stat category under each value — was 8px, which is hard to read at a glance mid-show */
+  .stat-grid .cell .k{font-family:var(--font-mono);font-weight:500;font-size:11px;color:var(--label);
+    text-transform:uppercase;letter-spacing:.07em;margin-top:7px;opacity:1}
   .modal-empty{color:var(--text3);font-size:13px;font-family:var(--font-mono)}
   .pickhint{font-family:var(--font-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;
     color:var(--text3);margin-top:9px}
@@ -962,11 +963,17 @@ async function fetchGameLog(pid, year) {
   const labels = (d.labels || []).map(s => (s || '').trim());
   const events = d.events || {};
   const games = [];
+  let dropped = 0;
   (d.seasonTypes || []).forEach(stype => {
     (stype.categories || []).forEach(cat => {
       (cat.events || []).forEach(e => {
         const meta = events[e.eventId] || {};
         const opp = meta.opponent || {};
+        // Skip anything whose opponent isn't one of the 32 clubs. That's the Pro Bowl: ESPN files
+        // it under "Postseason" with the opponent listed as AFC or NFC, so without this an all-star
+        // game lands in "Last 3", inflates career totals, and shows up as a selectable opponent
+        // called AFC. Real playoff games have a real club as the opponent and are kept.
+        if (!DIV_OF[(opp.abbreviation || '').toUpperCase()]) { dropped++; return; }
         games.push({
           eventId: e.eventId,
           stats: e.stats || [],
@@ -991,7 +998,7 @@ async function fetchGameLog(pid, year) {
   const reg = (d.seasonTypes || []).find(s => /regular/i.test(s.displayName || ''));
   if (reg && (reg.categories || []).length) totals = (reg.categories[0] || {}).totals || null;
 
-  return { names, labels, games, totals };
+  return { names, labels, games, totals, dropped };
 }
 
 // Turn a values array into a {name: rawString} map.
@@ -1093,6 +1100,34 @@ async function fetchCareer(pid) {
   return { names, totals, seasons: [...seasons.values()].sort((a, b) => b.year - a.year) };
 }
 
+// Career vs one opponent has no endpoint of its own — the splits endpoint is per-season only (its
+// byOpponent category covers a single year), so this walks the game log of every season the player
+// actually has stats for and keeps the games against that club. One request per season, fired in
+// parallel and cached, so it's paid once per player.
+//
+// Stats are keyed by name rather than by column position here: a player's stat columns can differ
+// between seasons (a college-to-pro position change, or a category ESPN added later), so indexing
+// into each season's array by number would silently mix a rushing total into a receiving one.
+async function fetchCareerGames(pid) {
+  if (!modalCareer) modalCareer = await fetchCareer(pid);
+  const years = modalCareer.seasons.map(s => s.year);
+  const logs = (await Promise.all(years.map(y => fetchGameLog(pid, y).catch(() => null)))).filter(Boolean);
+
+  const names = [];
+  const games = [];
+  logs.forEach(lg => {
+    (lg.names || []).forEach(n => { if (!names.includes(n)) names.push(n); });
+    (lg.games || []).forEach(g => games.push({ ...g, map: toMap(lg.names, g.stats) }));
+  });
+  games.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+  return { names, games, seasons: years.length };
+}
+
+// Aggregate games whose stats are name-keyed maps, by realigning them to one shared name order.
+function aggregateGameMaps(names, games) {
+  return aggregate(names, games.map(g => names.map(n => g.map[n])));
+}
+
 // =====================================================================================
 // Position groups + which stats make the on-air bar
 // =====================================================================================
@@ -1159,11 +1194,13 @@ const TF = [
   ['away',   'AWAY'],
   ['div',    'VS DIVISION'],
   ['opp',    'VS OPPONENT'],
-  ['career', 'CAREER'],
+  ['career', 'CAREER TOTAL'],
+  ['careerOpp', 'CAREER VS TEAM'],
 ];
+const isOppTf = tf => tf === 'opp' || tf === 'careerOpp';
 
 let modalPid = null, modalRow = null, modalTf = 'season';
-let modalLog = null, modalCareer = null;
+let modalLog = null, modalCareer = null, modalCareerGames = null;
 let modalMap = null, modalNames = null, modalLabel = '', modalSub = '';
 let modalOpp = '';
 // Which stats are on the bar, in bar order. Seeded from the position defaults each time a new
@@ -1178,7 +1215,7 @@ async function openPlayerModal(pid) {
   const samePlayer = modalPid === String(pid);
   modalPid = String(pid); modalRow = row; modalTf = 'season'; modalOpp = '';
   if (!samePlayer) modalPicks = [];      // new player: back to that position's defaults
-  modalLog = modalCareer = null;
+  modalLog = modalCareer = modalCareerGames = null;
   $('modalDlNote').textContent = '';
   $('modalHeadshot').src = headshotURL(pid);
   $('modalHeadshot').onerror = function () { this.style.visibility = 'hidden'; };
@@ -1210,6 +1247,7 @@ function tfLabel(tf, year) {
     case 'div':    return `${year} VS DIVISION`;
     case 'opp':    return modalOpp ? `${year} VS ${modalOpp}` : `${year} VS OPPONENT`;
     case 'career': return 'CAREER';
+    case 'careerOpp': return modalOpp ? `CAREER VS ${modalOpp}` : 'CAREER VS TEAM';
     default:       return String(tf).toUpperCase();
   }
 }
@@ -1232,15 +1270,19 @@ function gamesFor(tf, log, row) {
   }
 }
 
-function paintOppSelect(log) {
+// Opponent picker, listing only clubs the player has actually faced — for the season pill that's
+// this year's schedule, for the career pill it's everyone they've ever played.
+function paintOppSelect(games) {
   const row = $('oppRow'), sel = $('oppSelect');
-  const show = modalTf === 'opp';
+  const show = isOppTf(modalTf);
   row.hidden = !show;
   if (!show) return;
-  const opps = [...new Set((log.games || []).map(g => g.oppAbbr).filter(Boolean))].sort();
-  if (!modalOpp && opps.length) modalOpp = opps[0];
+  const counts = new Map();
+  (games || []).forEach(g => { if (g.oppAbbr) counts.set(g.oppAbbr, (counts.get(g.oppAbbr) || 0) + 1); });
+  const opps = [...counts.keys()].sort();
+  if (!opps.includes(modalOpp)) modalOpp = opps[0] || '';
   sel.innerHTML = opps.length
-    ? opps.map(a => `<option value="${a}"${a === modalOpp ? ' selected' : ''}>${a}</option>`).join('')
+    ? opps.map(a => `<option value="${a}"${a === modalOpp ? ' selected' : ''}>${a} (${counts.get(a)} G)</option>`).join('')
     : '<option value="">no games</option>';
 }
 
@@ -1257,25 +1299,40 @@ function statGrid(entries, picks) {
   }).join('') + `</div>`;
 }
 
-function gameLogTable(games) {
+// ESPN's season label is the starting year, so a January game belongs to the previous season —
+// hence the month check rather than just slicing the year off the date.
+function seasonOf(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return String(d.getUTCMonth() < 8 ? d.getUTCFullYear() - 1 : d.getUTCFullYear());
+}
+
+function gameLogTable(games, showSeason) {
   if (!games.length) return '';
-  const rows = games.slice(0, 6).map(g =>
-    `<tr><td>${g.week ? 'WK ' + g.week : ''}</td><td>${g.home ? 'vs' : '@'} ${g.oppAbbr}</td>` +
+  const LIMIT = showSeason ? 12 : 6;
+  const rows = games.slice(0, LIMIT).map(g =>
+    `<tr>` + (showSeason ? `<td>${seasonOf(g.date)}</td>` : '') +
+    `<td>${g.week ? 'WK ' + g.week : ''}</td><td>${g.home ? 'vs' : '@'} ${g.oppAbbr}</td>` +
     `<td class="${g.result === 'W' ? 'w' : g.result === 'L' ? 'l' : ''}">${g.result || ''} ${g.score || ''}</td></tr>`).join('');
-  return `<table class="gamelog"><thead><tr><th>Week</th><th>Opp</th><th>Result</th></tr></thead>` +
-         `<tbody>${rows}</tbody></table>`;
+  return `<table class="gamelog"><thead><tr>${showSeason ? '<th>Season</th>' : ''}` +
+         `<th>Week</th><th>Opp</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table>` +
+         (games.length > LIMIT ? `<div class="pickhint">Showing ${LIMIT} of ${games.length} games</div>` : '');
 }
 
 async function loadModalStats() {
   const pid = modalPid, row = modalRow, tf = modalTf;
   const year = $('season').value;
   const group = POS_GROUP(row.pos);
-  $('modalBody').innerHTML = `<div class="modal-empty">Loading ${tfLabel(tf, year).toLowerCase()}…</div>`;
+  // Career-vs-team walks every season, so say so rather than sitting on a bare "Loading…"
+  $('modalBody').innerHTML = `<div class="modal-empty">Loading ${tfLabel(tf, year).toLowerCase()}` +
+    `${tf === 'careerOpp' ? ' — reading every season' : ''}…</div>`;
   $('modalSend').hidden = true;
 
   try {
     if (tf === 'career') {
       if (!modalCareer) modalCareer = await fetchCareer(pid);
+    } else if (tf === 'careerOpp') {
+      if (!modalCareerGames) modalCareerGames = await fetchCareerGames(pid);
     } else if (!modalLog) {
       modalLog = await fetchGameLog(pid, year);
     }
@@ -1298,6 +1355,13 @@ async function loadModalStats() {
     names = modalCareer.names; map = modalCareer.totals || {};
     const yrs = modalCareer.seasons.length;
     sub = `${map.gamesPlayed || '?'} GP · ${yrs} SEASON${yrs === 1 ? '' : 'S'}`;
+  } else if (tf === 'careerOpp') {
+    names = modalCareerGames.names;
+    paintOppSelect(modalCareerGames.games);
+    windowGames = modalOpp ? modalCareerGames.games.filter(g => g.oppAbbr === modalOpp) : [];
+    map = aggregateGameMaps(names, windowGames);
+    const yrs = new Set(windowGames.map(g => (g.date || '').slice(0, 4))).size;
+    sub = `${windowGames.length} G` + (yrs > 1 ? ` · ${yrs} SEASONS` : '');
   } else {
     names = modalLog.names;
     paintOppSelect(modalLog);
@@ -1324,7 +1388,9 @@ async function loadModalStats() {
       ? 'No career stats on record for this player.'
       : !names || !names.length
         ? `No ${year} stats for this player — they may not have played this season.`
-        : `No games in this filter for ${year}.`;
+        : tf === 'careerOpp'
+          ? `Never played ${modalOpp || 'that team'}.`
+          : `No games in this filter for ${year}.`;
     $('modalBody').innerHTML = `<div class="modal-empty">${why}</div>`;
     modalMap = null;
     updateSendBtn();
@@ -1344,7 +1410,8 @@ async function loadModalStats() {
   modalPicks = live.length ? live : defaultPicks(group, map, names);
 
   const gamesHtml = windowGames.length && tf !== 'season'
-    ? `<div class="modal-section"><h3>Games in this filter</h3>${gameLogTable(windowGames)}</div>` : '';
+    ? `<div class="modal-section"><h3>Games in this filter</h3>` +
+      `${gameLogTable(windowGames, tf === 'careerOpp')}</div>` : '';
   $('modalBody').innerHTML =
     `<div class="modal-section"><h3>${modalLabel} · ${sub}</h3>` +
     `<div class="modal-hitline" id="barShows"></div>` +
@@ -1436,7 +1503,7 @@ function updateOnAirUI(payload) {
 // What's currently selected in the modal, as a comparable key — lets the Send button say whether
 // this exact line is the one already on screen. The chosen stats are part of it, so changing the
 // selection flips "● On Air" back to "▶ Send to OBS" rather than implying the bar already updated.
-const liveKey = () => `${modalPid}|${modalTf}|${modalTf === 'opp' ? modalOpp : ''}|${modalPicks.join(',')}`;
+const liveKey = () => `${modalPid}|${modalTf}|${isOppTf(modalTf) ? modalOpp : ''}|${modalPicks.join(',')}`;
 let onAirKey = null;
 
 function updateSendBtn() {
@@ -1600,7 +1667,7 @@ $('team').onchange = () => {
 };
 $('season').onchange = guard(async () => {
   jCache.clear();                                  // season changed: gamelogs must refetch
-  modalLog = modalCareer = null;
+  modalLog = modalCareer = modalCareerGames = null;
   if (currentView === 'roster' && currentTeamId) guard(loadRoster)(currentTeamId);
   else if (currentView === 'search') renderSearchResults($('find').value);
   else renderDirectory($('division').value);
