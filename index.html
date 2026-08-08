@@ -179,9 +179,12 @@
   .modal-export-btn:hover{background:#e02c48;border-color:#e02c48;color:var(--white)}
   .modal-export-btn:disabled{opacity:.35;cursor:default;background:var(--surface);color:var(--text2);
     border-color:var(--border)}
-  /* already the line on screen — reads as status, and a re-press is a harmless re-send */
-  .modal-export-btn.live{background:var(--green);border-color:var(--green);color:#00281a}
-  .modal-export-btn.live:hover{background:#7ce9bd;border-color:#7ce9bd;color:#00281a}
+  /* this player's card is what's on screen right now — Send has become Take Down */
+  .modal-export-btn.live{background:transparent;border-color:var(--accent);color:var(--accent)}
+  .modal-export-btn.live:hover{background:var(--accent-dim);color:var(--white)}
+  /* only shown while this player is on air — pushes the current selection without taking it down first */
+  .modal-export-btn.update{background:var(--label);border-color:var(--label);color:var(--surface3)}
+  .modal-export-btn.update:hover{background:#a9d3f7;border-color:#a9d3f7;color:var(--surface3)}
   .modal-section{margin-bottom:18px}
   .modal-section h3{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;
     text-transform:uppercase;color:var(--label);margin:0 0 10px;opacity:1;font-weight:500}
@@ -378,10 +381,10 @@
     <div class="modal-export-row" id="modalExportRow">
       <button id="modalSend" class="modal-export-btn" type="button" hidden
         title="Put this stat line on the OBS lower third">▶ Send to OBS</button>
+      <button id="modalUpdate" class="modal-export-btn update" type="button" hidden
+        title="Push the current selection to the graphic that's already on air">↻ Update Graphic</button>
       <button id="modalDownload" class="modal-export-btn" type="button" hidden
         title="Download this stat line as a PNG lower third">⬇ Save PNG</button>
-      <button id="modalExitOnAir" class="exit-btn" type="button"
-        title="Remove the lower third from OBS">✕ Exit Lower Third</button>
     </div>
     <div id="modalDlNote" class="modal-dlnote"></div>
   </div>
@@ -1558,12 +1561,12 @@ function pushOnAir(pid, row, data) {
 }
 
 function clearOnAir() {
-  onAirPid = null; onAirKey = null;
+  onAirPid = null;
   try { localStorage.removeItem(LT_KEY); } catch {}
   if (ltChannel) ltChannel.postMessage({ clear: true });
   publishTopic(null);
   updateOnAirUI(null);
-  if (!$('modalBackdrop').hidden) updateSendBtn();   // flip "● On Air" back to "▶ Send to OBS"
+  if (!$('modalBackdrop').hidden) updateSendBtn();   // flip "◼ Take Down" back to "▶ Send to OBS"
 }
 
 function updateOnAirUI(payload) {
@@ -1572,28 +1575,28 @@ function updateOnAirUI(payload) {
   if (payload) $('onairText').innerHTML = `On air: <b>${payload.name}</b> · ${payload.data.label}`;
 }
 
-// What's currently selected in the modal, as a comparable key — lets the Send button say whether
-// this exact line is the one already on screen. The chosen stats are part of it, so changing the
-// selection flips "● On Air" back to "▶ Send to OBS" rather than implying the bar already updated.
-const liveKey = () => `${modalPid}|${modalTf}|${isOppTf(modalTf) ? modalOpp : ''}|${modalPicks.join(',')}`;
-let onAirKey = null;
+// Is the player this modal has open the one currently on the OBS bar? Not whether the exact
+// selection matches — flipping timeframes or picks while live is meant to be safe, that's what
+// Update Graphic is for.
+const onThisPlayer = () => !!onAirPid && String(onAirPid) === String(modalPid);
 
 function updateSendBtn() {
-  const btn = $('modalSend');
+  const btn = $('modalSend'), updBtn = $('modalUpdate'), dl = $('modalDownload');
   if (!btn) return;
   const has = !!graphicData();
-  btn.hidden = !has;
-  const isLive = has && onAirKey === liveKey() && String(onAirPid) === String(modalPid);
-  btn.textContent = isLive ? '● On Air' : '▶ Send to OBS';
-  btn.classList.toggle('live', isLive);
-  const dl = $('modalDownload');
+  const live = onThisPlayer();
+  btn.hidden = !has && !live;
+  btn.textContent = live ? '◼ Take Down' : '▶ Send to OBS';
+  btn.classList.toggle('live', live);
+  if (updBtn) updBtn.hidden = !(live && has);
   if (dl) dl.hidden = !has;
 }
 
 // Nothing reaches OBS until Send is pressed. Browsing players and flipping through timeframes is
 // therefore always safe mid-show: the bar holds whatever was last sent, so the producer can go
-// look something up on air without it appearing on screen behind them.
-function sendToObs() {
+// look something up on air without it appearing on screen behind them. Once this player is on air,
+// the same button becomes Take Down (see updateSendBtn) — Update Graphic is the one that re-pushes.
+function pushGraphic(doneMsg) {
   const data = graphicData();
   const note = $('modalDlNote');
   if (!data || !modalRow) {
@@ -1601,9 +1604,17 @@ function sendToObs() {
     return;
   }
   pushOnAir(modalPid, modalRow, data);
-  onAirKey = liveKey();
   updateSendBtn();
-  if (note) note.textContent = 'Sent to OBS ✓';
+  if (note) note.textContent = doneMsg;
+}
+
+function toggleObs() {
+  if (onThisPlayer()) {
+    clearOnAir();
+    const note = $('modalDlNote'); if (note) note.textContent = 'Removed from OBS ✓';
+    return;
+  }
+  pushGraphic('Sent to OBS ✓');
 }
 
 // =====================================================================================
@@ -1891,7 +1902,8 @@ $('modalBody').onkeydown = e => {
   if (cell) { e.preventDefault(); toggleStat(cell.dataset.stat); }
 };
 $('modalClose').onclick = closeModal;
-$('modalSend').onclick = sendToObs;
+$('modalSend').onclick = toggleObs;
+$('modalUpdate').onclick = () => pushGraphic('Updated ✓');
 $('modalDownload').onclick = downloadGraphic;
 $('modalBackdrop').onclick = e => { if (e.target.id === 'modalBackdrop') closeModal(); };
 document.onkeydown = e => { if (e.key === 'Escape' && !$('modalBackdrop').hidden) closeModal(); };
@@ -1954,10 +1966,6 @@ $('obsUrlCopy').onclick = () => {
     .finally(() => setTimeout(() => { btn.textContent = 'Copy'; }, 1600));
 };
 $('onairClear').onclick = clearOnAir;
-$('modalExitOnAir').onclick = () => {
-  clearOnAir();
-  $('modalDlNote').textContent = 'Removed from OBS ✓';
-};
 
 function copyText(text) {
   if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
