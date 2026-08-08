@@ -197,6 +197,7 @@
   .stat-grid .cell:not(.pick){opacity:.5}
   .stat-grid .cell:not(.pick):hover{opacity:.85}
   .stat-grid .cell.pick{border-color:var(--accent);background:var(--accent-dim);opacity:1}
+  .stat-grid .cell.dragging{opacity:.4;cursor:grabbing}
   /* position of this stat on the bar, so the click order is visible */
   .stat-grid .cell .ord{position:absolute;top:3px;right:5px;font-family:var(--font-mono);
     font-size:8px;color:var(--accent);letter-spacing:.06em}
@@ -377,6 +378,8 @@
     <div class="modal-export-row" id="modalExportRow">
       <button id="modalSend" class="modal-export-btn" type="button" hidden
         title="Put this stat line on the OBS lower third">▶ Send to OBS</button>
+      <button id="modalDownload" class="modal-export-btn" type="button" hidden
+        title="Download this stat line as a PNG lower third">⬇ Save PNG</button>
       <button id="modalExitOnAir" class="exit-btn" type="button"
         title="Remove the lower third from OBS">✕ Exit Lower Third</button>
     </div>
@@ -1177,9 +1180,40 @@ function defaultPicks(group, map, names) {
   return picks;
 }
 
+// Drag order is remembered per position group (QB/RB/WR/etc.), not per player — so rearranging the
+// bar for one quarterback keeps that arrangement the next time any quarterback is opened, the same
+// way the Warehouse Games lower third remembers stat order per side.
+let statOrder = {};
+try { statOrder = JSON.parse(localStorage.getItem('nfl.statorder') || '{}'); } catch { statOrder = {}; }
+
+function saveOrder(group, names) {
+  statOrder[group] = names;
+  try { localStorage.setItem('nfl.statorder', JSON.stringify(statOrder)); } catch {}
+}
+
+// Curated spec order first, then whatever else the position has — this is the baseline a group
+// starts from before any drag ever moves a tile.
+function defaultEntryOrder(group, entries) {
+  const spec = CELL_SPEC[group] || [];
+  const byName = new Map(entries.map(e => [e[0], e]));
+  const ordered = spec.filter(k => byName.has(k)).map(k => byName.get(k));
+  const rest = entries.filter(([name]) => !spec.includes(name));
+  return [...ordered, ...rest];
+}
+
+// Re-sorts entries against a remembered drag order. Stable, and anything the remembered order has
+// never seen (a stat this player has that the last one didn't) just stays where it already was.
+function orderedEntries(group, entries) {
+  const ord = statOrder[group];
+  if (!ord || !ord.length) return entries;
+  const at = e => { const i = ord.indexOf(e[0]); return i < 0 ? 1e6 : i; };
+  return [...entries].sort((a, b) => at(a) - at(b));
+}
+
 // Selection order is bar order, so clicking builds the layout left to right.
-function cellsFromPicks(picks, map) {
-  return (picks || []).filter(k => hasVal(map[k])).map(k => [labelFor(k, LABEL_HINT[k]), map[k]]);
+function cellsFromPicks(entries, picks, map) {
+  return (entries || []).filter(([name]) => picks.includes(name) && hasVal(map[name]))
+    .map(([name, label]) => [label, map[name]]);
 }
 
 // =====================================================================================
@@ -1199,7 +1233,7 @@ const TF = [
 ];
 const isOppTf = tf => tf === 'opp' || tf === 'careerOpp';
 
-let modalPid = null, modalRow = null, modalTf = 'season';
+let modalPid = null, modalRow = null, modalTf = 'season', modalGroup = null;
 let modalLog = null, modalCareer = null, modalCareerGames = null;
 let modalMap = null, modalNames = null, modalLabel = '', modalSub = '';
 let modalOpp = '';
@@ -1286,17 +1320,52 @@ function paintOppSelect(games) {
     : '<option value="">no games</option>';
 }
 
-// Every cell is a toggle: click to put that stat on the bar, click again to take it off. Selected
-// cells carry their position in the bar, so the order you click is the order it reads on screen.
+// Every cell is a toggle: click to put that stat on the bar, click again to take it off. Bar order
+// follows the grid's own order (drag a tile to move it — see wireGridDrag), so the badge on a
+// selected cell is its position among the *other selected* cells in that same order, not click order.
 function statGrid(entries, picks) {
-  const order = new Map((picks || []).map((k, i) => [k, i + 1]));
+  const pickedInOrder = entries.filter(([name]) => picks.includes(name)).map(([name]) => name);
+  const order = new Map(pickedInOrder.map((k, i) => [k, i + 1]));
   return `<div class="stat-grid">` + entries.map(([name, label, v]) => {
     const n = order.get(name);
-    return `<div class="cell${n ? ' pick' : ''}" data-stat="${name}" role="button" tabindex="0"` +
-      ` title="${n ? 'Click to take off the bar' : 'Click to add to the bar'}">` +
+    return `<div class="cell${n ? ' pick' : ''}" data-stat="${name}" draggable="true" role="button" tabindex="0"` +
+      ` title="${n ? 'Click to take off the bar · drag to reorder' : 'Click to add to the bar · drag to reorder'}">` +
       (n ? `<div class="ord">${n}</div>` : '') +
       `<div class="v">${hasVal(v) ? v : '–'}</div><div class="k">${label}</div></div>`;
   }).join('') + `</div>`;
+}
+
+// Drag a tile to move it; where the tiles sit is the order they appear on the bar. Listeners live on
+// the host (which survives every repaint), guarded so they're only wired once.
+let statDragging = false;
+function wireGridDrag(host) {
+  if (host.dataset.drag) return;
+  host.dataset.drag = '1';
+  host.addEventListener('dragstart', e => {
+    const c = e.target.closest('.cell'); if (!c) return;
+    statDragging = true; c.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', c.dataset.stat || '');
+  });
+  host.addEventListener('dragover', e => {
+    const grid = host.querySelector('.stat-grid');
+    const held = grid && grid.querySelector('.cell.dragging'); if (!held) return;
+    e.preventDefault();
+    const over = e.target.closest('.cell');
+    if (!over || over === held) return;
+    const r = over.getBoundingClientRect();
+    grid.insertBefore(held, (e.clientX - r.left) > r.width / 2 ? over.nextSibling : over);
+  });
+  host.addEventListener('drop', e => e.preventDefault());
+  host.addEventListener('dragend', () => {
+    const grid = host.querySelector('.stat-grid');
+    const held = grid && grid.querySelector('.cell.dragging');
+    if (held) held.classList.remove('dragging');
+    if (!grid || !modalGroup) return;
+    saveOrder(modalGroup, [...grid.querySelectorAll('.cell')].map(c => c.dataset.stat));
+    modalEntries = orderedEntries(modalGroup, modalEntries);
+    paintStatGrid();
+  });
 }
 
 // ESPN's season label is the starting year, so a January game belongs to the previous season —
@@ -1322,7 +1391,7 @@ function gameLogTable(games, showSeason) {
 async function loadModalStats() {
   const pid = modalPid, row = modalRow, tf = modalTf;
   const year = $('season').value;
-  const group = POS_GROUP(row.pos);
+  const group = modalGroup = POS_GROUP(row.pos);
   // Career-vs-team walks every season, so say so rather than sitting on a bare "Loading…"
   $('modalBody').innerHTML = `<div class="modal-empty">Loading ${tfLabel(tf, year).toLowerCase()}` +
     `${tf === 'careerOpp' ? ' — reading every season' : ''}…</div>`;
@@ -1397,11 +1466,13 @@ async function loadModalStats() {
     return;
   }
 
-  // Every stat this position returned, as [name, label, value] — the clickable grid.
-  modalEntries = names
+  // Every stat this position returned, as [name, label, value] — the clickable grid. Ordered by the
+  // curated spec first, then re-sorted against whatever this group has been dragged to before.
+  const rawEntries = names
     .filter(n => n !== 'gamesPlayed' && !(tf !== 'season' && tf !== 'career' && UNAGGREGATABLE.has(n)))
     .map(n => [n, labelFor(n, LABEL_HINT[n]), map[n]])
     .filter(([, , v]) => v != null && v !== '');
+  modalEntries = orderedEntries(group, defaultEntryOrder(group, rawEntries));
 
   // Seed the selection from the position defaults. Also re-seed if a carried-over selection has
   // nothing left in it — Career exposes a different set of stat names than the game log does, so a
@@ -1416,7 +1487,7 @@ async function loadModalStats() {
     `<div class="modal-section"><h3>${modalLabel} · ${sub}</h3>` +
     `<div class="modal-hitline" id="barShows"></div>` +
     `<div id="statGridHost"></div>` +
-    `<div class="pickhint">Click a stat to add or remove it from the bar · up to ${MAX_PICKS}</div>` +
+    `<div class="pickhint">Click a stat to add or remove it · drag a tile to move it · up to ${MAX_PICKS}</div>` +
     `</div>` + gamesHtml;
 
   paintStatGrid();
@@ -1427,9 +1498,10 @@ function paintStatGrid() {
   const host = $('statGridHost');
   if (!host || !modalMap) return;
   host.innerHTML = statGrid(modalEntries, modalPicks);
+  wireGridDrag(host);
   const shows = $('barShows');
   if (shows) {
-    const cells = cellsFromPicks(modalPicks, modalMap);
+    const cells = cellsFromPicks(modalEntries, modalPicks, modalMap);
     shows.textContent = cells.length
       ? `Bar shows: ${cells.map(([label]) => label).join(' · ')}`
       : 'Nothing selected — click a stat below';
@@ -1464,7 +1536,7 @@ function closeModal() { $('modalBackdrop').hidden = true; }
 
 function graphicData() {
   if (!modalMap || !modalRow) return null;
-  const cells = cellsFromPicks(modalPicks, modalMap);
+  const cells = cellsFromPicks(modalEntries, modalPicks, modalMap);
   if (!cells.length) return null;
   return { label: modalLabel, hitLine: modalSub, cells };
 }
@@ -1514,6 +1586,8 @@ function updateSendBtn() {
   const isLive = has && onAirKey === liveKey() && String(onAirPid) === String(modalPid);
   btn.textContent = isLive ? '● On Air' : '▶ Send to OBS';
   btn.classList.toggle('live', isLive);
+  const dl = $('modalDownload');
+  if (dl) dl.hidden = !has;
 }
 
 // Nothing reaches OBS until Send is pressed. Browsing players and flipping through timeframes is
@@ -1530,6 +1604,124 @@ function sendToObs() {
   onAirKey = liveKey();
   updateSendBtn();
   if (note) note.textContent = 'Sent to OBS ✓';
+}
+
+// =====================================================================================
+// PNG export — the same lower third as a standalone graphic, no OBS required
+// =====================================================================================
+
+const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+// Loads an image and proves it won't taint the canvas before committing to it — ESPN's headshot
+// CDN sends CORS today, but a graphic without a photo beats a failed export if that ever changes.
+function loadSafeImage(src) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const t = document.createElement('canvas'); t.width = t.height = 2;
+        t.getContext('2d').drawImage(img, 0, 0, 2, 2);
+        t.toDataURL();
+        resolve(img);
+      } catch { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+// Mirrors the on-air .lt-bar layout on a canvas, reading the same brand colors out of :root, so the
+// downloaded graphic and the live OBS bar always match.
+async function renderLowerThirdCanvas(data, row, pid) {
+  await Promise.all([document.fonts.load('400 68px "Bebas Neue"'), document.fonts.load('500 22px "DM Mono"')]);
+  const img = await loadSafeImage(headshotURL(pid));
+
+  const W = 1920, H = 200;
+  const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  const ltFrom = cssVar('--lt-from'), ltMid = cssVar('--lt-mid'), ltTo = cssVar('--lt-to');
+  const accent = cssVar('--accent'), label = cssVar('--label'), white = cssVar('--white') || '#fff';
+
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, ltFrom); grad.addColorStop(0.55, ltMid); grad.addColorStop(1, ltTo);
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = accent; ctx.fillRect(0, 0, W, 6);
+
+  const pad = 44, r = 76, cx = pad + r, cy = H / 2;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.closePath();
+  if (img) {
+    ctx.save(); ctx.clip();
+    const size = r * 2, scale = Math.max(size / img.width, size / img.height);
+    const iw = img.width * scale, ih = img.height * scale;
+    ctx.drawImage(img, cx - iw / 2, cy - ih / 2, iw, ih);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = ltMid; ctx.fill();
+  }
+  ctx.lineWidth = 4; ctx.strokeStyle = accent; ctx.stroke();
+
+  const nx = cx + r + 24;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.font = '400 68px "Bebas Neue"';
+  const name = (row.name || '').toUpperCase();
+  const nameW = ctx.measureText(name).width;
+  ctx.font = '500 22px "DM Mono"';
+  const sub = [row.pos, row.team].filter(Boolean).join('  ·  ').toUpperCase();
+  const subW = ctx.measureText(sub).width;
+
+  ctx.fillStyle = white; ctx.font = '400 68px "Bebas Neue"'; ctx.fillText(name, nx, cy - 6);
+  ctx.fillStyle = label; ctx.font = '500 22px "DM Mono"'; ctx.fillText(sub, nx, cy + 28);
+
+  const dividerX = nx + Math.max(nameW, subW) + 24;
+  ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(dividerX, 36); ctx.lineTo(dividerX, H - 36); ctx.stroke();
+
+  const statsX0 = dividerX + 24, statsW = (W - pad) - statsX0, cellW = statsW / Math.max(data.cells.length, 1);
+  if (data.hitLine) {
+    ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '500 20px "DM Mono"';
+    ctx.fillText(data.hitLine.toUpperCase(), statsX0 + statsW / 2, 46);
+  }
+  const valueBase = data.hitLine ? 128 : 118, labelBase = valueBase + 34;
+  data.cells.forEach(([lbl, value], i) => {
+    const x = statsX0 + i * cellW + cellW / 2;
+    ctx.textAlign = 'center';
+    let vs = data.cells.length > 6 ? 60 : data.cells.length > 4 ? 68 : 76;
+    ctx.font = `400 ${vs}px "Bebas Neue"`;
+    while (vs > 28 && ctx.measureText(String(value)).width > cellW - 16)
+      ctx.font = `400 ${vs -= 2}px "Bebas Neue"`;
+    ctx.fillStyle = white; ctx.fillText(String(value), x, valueBase);
+    ctx.fillStyle = label; ctx.font = '500 17px "DM Mono"';
+    ctx.fillText(String(lbl).toUpperCase(), x, labelBase);
+  });
+
+  ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(255,255,255,.3)'; ctx.font = '500 12px "DM Mono"';
+  ctx.fillText(WORDMARK, W - 24, H - 14);
+
+  return { canvas, hadPhoto: !!img };
+}
+
+async function downloadGraphic() {
+  const data = graphicData();
+  const note = $('modalDlNote'), btn = $('modalDownload');
+  if (!data || !modalRow) { if (note) note.textContent = 'Nothing to export for this timeframe.'; return; }
+  btn.disabled = true;
+  if (note) note.textContent = 'Building PNG…';
+  try {
+    const { canvas, hadPhoto } = await renderLowerThirdCanvas(data, modalRow, modalPid);
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    if (!blob) throw new Error('Canvas export failed');
+    const a = el('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${modalRow.name.replace(/[^\w\d]+/g, '-')}-${data.label.replace(/[^\w\d]+/g, '-')}-lower-third.png`;
+    a.click(); URL.revokeObjectURL(a.href);
+    if (note) note.textContent = hadPhoto ? 'Downloaded ✓' : 'Downloaded ✓ (headshot host blocked embedding — saved without it)';
+  } catch (e) {
+    if (note) note.textContent = 'Could not build the graphic: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // matches the CSS transition on .lt-bar, so a player-to-player swap fades the old one fully out
@@ -1689,6 +1881,7 @@ $('out').onclick = e => {
 $('oppSelect').onchange = () => { modalOpp = $('oppSelect').value; loadModalStats(); };
 // stat cells are toggles — click (or Enter/Space when tabbed to) puts a stat on the bar or takes it off
 $('modalBody').onclick = e => {
+  if (statDragging) { statDragging = false; return; }   // a drag ends on a tile; don't toggle it too
   const cell = e.target.closest('.stat-grid .cell[data-stat]');
   if (cell) toggleStat(cell.dataset.stat);
 };
@@ -1699,6 +1892,7 @@ $('modalBody').onkeydown = e => {
 };
 $('modalClose').onclick = closeModal;
 $('modalSend').onclick = sendToObs;
+$('modalDownload').onclick = downloadGraphic;
 $('modalBackdrop').onclick = e => { if (e.target.id === 'modalBackdrop') closeModal(); };
 document.onkeydown = e => { if (e.key === 'Escape' && !$('modalBackdrop').hidden) closeModal(); };
 $('openDisplay').onclick = () => {
