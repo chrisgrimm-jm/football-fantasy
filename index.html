@@ -887,7 +887,7 @@ const NICE_LABEL = {
   longInterception:'LNG INT',
   punts:'PUNTS', puntYards:'PUNT YDS', grossAvgPuntYards:'AVG', netAvgPuntYards:'NET',
   longPunt:'LNG', touchbacks:'TB', touchbackPct:'TB%', puntsInside20:'IN20', puntsInside20Pct:'IN20%',
-  puntReturns:'PR', puntReturnYards:'PR YDS', avgPuntReturnYards:'PR AVG',
+  puntReturns:'PR', puntReturnYards:'PR YDS', avgPuntReturnYards:'PR AVG', longPuntReturn:'LNG PR',
   kickReturns:'KR', kickReturnYards:'KR YDS', longKickReturn:'LNG KR',
   fieldGoalPct:'FG%', longFieldGoalMade:'LNG FG', fieldGoalsMadeYardsAverage:'FG AVG',
   totalKickingPoints:'PTS', totalPoints:'PTS', totalTouchdowns:'TD',
@@ -1005,6 +1005,124 @@ async function fetchGameLog(pid, year) {
   if (reg && (reg.categories || []).length) totals = (reg.categories[0] || {}).totals || null;
 
   return { names, labels, games, totals, dropped };
+}
+
+// =====================================================================================
+// Preseason — ESPN's athlete gamelog endpoint above never returns preseason games at all (checked
+// live: a 2026 preseason game already played on the wire came back with zero events), so it can't
+// feed the same pipeline as the regular season. Preseason box scores only exist per-game, off the
+// team schedule — one schedule call to find which preseason games happened, then one boxscore call
+// per game to pull this player's line out of it. That keeps it a completely separate fetch from
+// fetchGameLog/fetchCareer, which is what keeps preseason out of the season and career totals: this
+// data never passes through the code that computes those.
+// =====================================================================================
+
+// A boxscore's stat categories use ESPN's broadcast-style labels (C/ATT, SACKS as "1-1", FG as
+// "2/2"), not the gamelog's machine names — mapped here onto that exact same vocabulary so the rest
+// of the app (labelFor, CELL_SPEC, aggregate's derived/max-of rules) doesn't need to know the
+// difference.
+function boxRowToMap(category, labels, stats) {
+  const val = label => { const i = labels.indexOf(label); return i < 0 ? undefined : stats[i]; };
+  const pair = raw => {
+    const m = /^(-?[\d.]+)\s*\/\s*(-?[\d.]+)$/.exec(String(raw == null ? '' : raw));
+    return m ? [m[1], m[2]] : [undefined, undefined];
+  };
+  const m = {};
+  const set = (name, v) => { if (v != null && v !== '') m[name] = v; };
+  switch (category) {
+    case 'passing': {
+      const [c, a] = pair(val('C/ATT'));
+      set('completions', c); set('passingAttempts', a);
+      set('passingYards', val('YDS')); set('passingTouchdowns', val('TD'));
+      set('interceptions', val('INT'));
+      set('sacks', String(val('SACKS') || '').split('-')[0]);
+      break;
+    }
+    case 'rushing':
+      set('rushingAttempts', val('CAR')); set('rushingYards', val('YDS'));
+      set('rushingTouchdowns', val('TD')); set('longRushing', val('LONG'));
+      break;
+    case 'receiving':
+      set('receptions', val('REC')); set('receivingYards', val('YDS'));
+      set('receivingTouchdowns', val('TD')); set('longReception', val('LONG'));
+      set('receivingTargets', val('TGTS'));
+      break;
+    case 'defensive':
+      set('totalTackles', val('TOT')); set('soloTackles', val('SOLO'));
+      set('sacks', val('SACKS')); set('stuffs', val('TFL')); set('passesDefended', val('PD'));
+      break;
+    case 'interceptions':
+      set('interceptions', val('INT')); set('interceptionYards', val('YDS'));
+      set('interceptionTouchdowns', val('TD'));
+      break;
+    case 'kicking': {
+      const [fm, fa] = pair(val('FG')), [xm, xa] = pair(val('XP'));
+      if (fm != null) m['fieldGoalsMade-fieldGoalAttempts'] = `${fm}-${fa}`;
+      if (xm != null) m['extraPointsMade-extraPointAttempts'] = `${xm}-${xa}`;
+      set('longFieldGoalMade', val('LONG')); set('totalKickingPoints', val('PTS'));
+      break;
+    }
+    case 'punting':
+      set('punts', val('NO')); set('puntYards', val('YDS')); set('touchbacks', val('TB'));
+      set('puntsInside20', val('In 20')); set('longPunt', val('LONG'));
+      break;
+    case 'kickReturns':
+      set('kickReturns', val('NO')); set('kickReturnYards', val('YDS')); set('longKickReturn', val('LONG'));
+      break;
+    case 'puntReturns':
+      set('puntReturns', val('NO')); set('puntReturnYards', val('YDS')); set('longPuntReturn', val('LONG'));
+      break;
+  }
+  return m;
+}
+
+// Every category from both teams' box scores that has a row for this player, merged into one map —
+// a player only ever shows up in the categories for their own position, so there's nothing to pick
+// a side over.
+function preseasonBoxMap(players, pid) {
+  const map = {};
+  (players || []).forEach(team => (team.statistics || []).forEach(cat => {
+    const row = (cat.athletes || []).find(a => a.athlete && String(a.athlete.id) === String(pid));
+    if (row) Object.assign(map, boxRowToMap(cat.name, cat.labels || [], row.stats || []));
+  }));
+  return map;
+}
+
+async function fetchPreseasonGames(pid, teamId, year) {
+  if (!teamId) return { names: [], games: [] };
+  const sched = await jc(`${SITE}/teams/${teamId}/schedule?season=${year}&seasontype=1`).catch(() => null);
+  const played = (sched && sched.events || []).filter(e => {
+    const t = ((e.competitions || [])[0] || {}).status;
+    return t && t.type && t.type.completed;
+  });
+
+  const games = [];
+  for (const e of played) {
+    const comp = (e.competitions || [])[0] || {};
+    const summary = await jc(`${SITE}/summary?event=${e.id}`).catch(() => null);
+    if (!summary) continue;
+    const map = preseasonBoxMap((summary.boxscore || {}).players, pid);
+    if (!Object.keys(map).length) continue;    // didn't play (inactive / DNP) in this one
+    const competitors = comp.competitors || [];
+    const me = competitors.find(c => c.team && String(c.team.id) === String(teamId));
+    const opp = competitors.find(c => c !== me) || {};
+    const myScore = me && me.score ? +me.score.value : null, oppScore = opp.score ? +opp.score.value : null;
+    games.push({
+      eventId: e.id, week: null, date: e.date,
+      home: me ? me.homeAway === 'home' : null,
+      result: myScore != null && oppScore != null ? (myScore > oppScore ? 'W' : myScore < oppScore ? 'L' : 'T') : '',
+      score: myScore != null && oppScore != null ? `${myScore}-${oppScore}` : '',
+      oppAbbr: (opp.team || {}).abbreviation || '',
+      oppName: (opp.team || {}).displayName || '',
+      seasonType: 'Preseason',
+      map,
+    });
+  }
+  games.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+  const names = [];
+  games.forEach(g => Object.keys(g.map).forEach(n => { if (!names.includes(n)) names.push(n); }));
+  return { names, games };
 }
 
 // Turn a values array into a {name: rawString} map.
@@ -1225,6 +1343,7 @@ function cellsFromPicks(entries, picks, map) {
 
 const TF = [
   ['season', 'FULL SEASON'],
+  ['pre',    'PRESEASON'],
   ['last3',  'LAST 3'],
   ['last5',  'LAST 5'],
   ['home',   'HOME'],
@@ -1237,7 +1356,7 @@ const TF = [
 const isOppTf = tf => tf === 'opp' || tf === 'careerOpp';
 
 let modalPid = null, modalRow = null, modalTf = 'season', modalGroup = null;
-let modalLog = null, modalCareer = null, modalCareerGames = null;
+let modalLog = null, modalCareer = null, modalCareerGames = null, modalPreseason = null;
 let modalMap = null, modalNames = null, modalLabel = '', modalSub = '';
 let modalOpp = '';
 // Which stats are on the bar, in bar order. Seeded from the position defaults each time a new
@@ -1252,7 +1371,7 @@ async function openPlayerModal(pid) {
   const samePlayer = modalPid === String(pid);
   modalPid = String(pid); modalRow = row; modalTf = 'season'; modalOpp = '';
   if (!samePlayer) modalPicks = [];      // new player: back to that position's defaults
-  modalLog = modalCareer = modalCareerGames = null;
+  modalLog = modalCareer = modalCareerGames = modalPreseason = null;
   $('modalDlNote').textContent = '';
   $('modalHeadshot').src = headshotURL(pid);
   $('modalHeadshot').onerror = function () { this.style.visibility = 'hidden'; };
@@ -1277,6 +1396,7 @@ function paintTfPills() {
 function tfLabel(tf, year) {
   switch (tf) {
     case 'season': return `${year} SEASON`;
+    case 'pre':    return `${year} PRESEASON`;
     case 'last3':  return 'LAST 3 GAMES';
     case 'last5':  return 'LAST 5 GAMES';
     case 'home':   return `${year} AT HOME`;
@@ -1405,6 +1525,8 @@ async function loadModalStats() {
       if (!modalCareer) modalCareer = await fetchCareer(pid);
     } else if (tf === 'careerOpp') {
       if (!modalCareerGames) modalCareerGames = await fetchCareerGames(pid);
+    } else if (tf === 'pre') {
+      if (!modalPreseason) modalPreseason = await fetchPreseasonGames(pid, row.teamId, year);
     } else if (!modalLog) {
       modalLog = await fetchGameLog(pid, year);
     }
@@ -1434,9 +1556,14 @@ async function loadModalStats() {
     map = aggregateGameMaps(names, windowGames);
     const yrs = new Set(windowGames.map(g => (g.date || '').slice(0, 4))).size;
     sub = `${windowGames.length} G` + (yrs > 1 ? ` · ${yrs} SEASONS` : '');
+  } else if (tf === 'pre') {
+    names = modalPreseason.names;
+    windowGames = modalPreseason.games;
+    map = aggregateGameMaps(names, windowGames);
+    sub = `${windowGames.length} G`;
   } else {
     names = modalLog.names;
-    paintOppSelect(modalLog);
+    paintOppSelect(modalLog.games);
     if (tf === 'season') {
       map = modalLog.totals ? toMap(names, modalLog.totals) : aggregate(names, (modalLog.games || []).map(g => g.stats));
       const gp = (modalLog.games || []).filter(g => /regular/i.test(g.seasonType)).length;
@@ -1458,11 +1585,13 @@ async function loadModalStats() {
   if (noData) {
     const why = tf === 'career'
       ? 'No career stats on record for this player.'
-      : !names || !names.length
-        ? `No ${year} stats for this player — they may not have played this season.`
-        : tf === 'careerOpp'
-          ? `Never played ${modalOpp || 'that team'}.`
-          : `No games in this filter for ${year}.`;
+      : tf === 'pre'
+        ? `No preseason games played yet for ${year}.`
+        : !names || !names.length
+          ? `No ${year} stats for this player — they may not have played this season.`
+          : tf === 'careerOpp'
+            ? `Never played ${modalOpp || 'that team'}.`
+            : `No games in this filter for ${year}.`;
     $('modalBody').innerHTML = `<div class="modal-empty">${why}</div>`;
     modalMap = null;
     updateSendBtn();
@@ -1870,7 +1999,7 @@ $('team').onchange = () => {
 };
 $('season').onchange = guard(async () => {
   jCache.clear();                                  // season changed: gamelogs must refetch
-  modalLog = modalCareer = modalCareerGames = null;
+  modalLog = modalCareer = modalCareerGames = modalPreseason = null;
   if (currentView === 'roster' && currentTeamId) guard(loadRoster)(currentTeamId);
   else if (currentView === 'search') renderSearchResults($('find').value);
   else renderDirectory($('division').value);
@@ -1990,8 +2119,12 @@ if (isDisplayMode) {
   initDisplay();
 } else {
   const cs = currentSeason();
-  $('season').innerHTML = Array.from({ length: cs - 1999 }, (_, i) => cs - i)
-    .map(y => `<option>${y}</option>`).join('');
+  // Regular-season data for cs+1 doesn't exist yet during Jan–Aug, but its preseason already has —
+  // e.g. the moment mid-August camp games start, that's already "season cs+1" on ESPN's own numbering,
+  // even though the last completed regular season (cs) stays the default view.
+  const years = Array.from({ length: cs - 1999 }, (_, i) => cs - i);
+  years.splice(1, 0, cs + 1);
+  $('season').innerHTML = years.map(y => `<option>${y}</option>`).join('');
 
   // Reconnect to last show's room automatically; first run gets a suggested one so the only step
   // is clicking Connect. The random tail matters — the room name is the whole address, so a
