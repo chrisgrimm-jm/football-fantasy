@@ -875,7 +875,7 @@ function paintSearch() {
 // receiving). So everything keys off `names`, and labels get disambiguated here.
 
 const NICE_LABEL = {
-  gamesPlayed:'GP',
+  gamesPlayed:'GP', fantasyPointsStd:'FPTS STD', fantasyPointsHalf:'FPTS HALF', fantasyPointsPPR:'FPTS PPR',
   completions:'CMP', passingAttempts:'ATT', passingYards:'PASS YDS', completionPct:'CMP%',
   yardsPerPassAttempt:'Y/ATT', passingTouchdowns:'PASS TD', interceptions:'INT',
   longPassing:'LNG PASS', sacks:'SACK', QBRating:'RTG', adjQBR:'QBR',
@@ -959,6 +959,45 @@ function passerRating(cmp, att, yds, td, ints) {
   return ((a + b + c + d) / 6 * 100).toFixed(1);
 }
 
+// aggregate() splits a compound "made-attempts" field (kicking's "33-38") into plain fieldGoalsMade/
+// fieldGoalAttempts as it sums multiple games — but a Full Season or Career total comes straight from
+// ESPN's own pre-summed totals and never passes through aggregate() at all, so it only ever has the
+// compound form. Same split, run once here instead, so fantasyPoints always has plain fields to add up
+// regardless of which path built this timeframe's map.
+function splitCompoundPairs(map) {
+  Object.keys(map).forEach(name => {
+    if (!name.includes('-')) return;
+    const m = /^(-?[\d.]+)\s*-\s*(-?[\d.]+)$/.exec(String(map[name] || ''));
+    if (!m) return;
+    const [ln, rn] = name.split('-');
+    if (map[ln] == null) map[ln] = m[1];
+    if (map[rn] == null) map[rn] = m[2];
+  });
+}
+
+// Standard/Half-PPR/Full-PPR fantasy scoring, computed once the whole stat line for a timeframe has
+// already been assembled. The three only ever differ by the per-reception bonus, so the rest of the
+// formula is shared and each variant just adds its own multiple of receptions on top. IDP (defense/
+// special-teams) scoring isn't included — most leagues don't use it, and it's a different ruleset
+// entirely from the offense/kicker one here.
+function fantasyPoints(map) {
+  const n = k => num(map[k]) || 0;
+  const base =
+    n('passingYards') * 0.04 + n('passingTouchdowns') * 4 + n('interceptions') * -2 +
+    n('rushingYards') * 0.1 + n('rushingTouchdowns') * 6 +
+    n('receivingYards') * 0.1 + n('receivingTouchdowns') * 6 +
+    n('fumblesLost') * -2 + n('totalTwoPointConvs') * 2 +
+    n('fieldGoalsMade') * 3 + n('extraPointsMade') * 1;
+  const rec = n('receptions');
+  return {
+    fantasyPointsStd: base.toFixed(1),
+    fantasyPointsHalf: (base + rec * 0.5).toFixed(1),
+    fantasyPointsPPR: (base + rec).toFixed(1),
+  };
+}
+const FANTASY_STAT_NAMES = ['fantasyPointsStd', 'fantasyPointsHalf', 'fantasyPointsPPR'];
+const FANTASY_GROUPS = new Set(['qb', 'rb', 'wr', 'k']);
+
 // =====================================================================================
 // Game log — one fetch drives every multi-game timeframe
 // =====================================================================================
@@ -1026,6 +1065,7 @@ async function fetchGameLog(pid, year) {
 const SIMPLE_BOX_MAP = {
   rushing:       { CAR: 'rushingAttempts', YDS: 'rushingYards', TD: 'rushingTouchdowns', LONG: 'longRushing' },
   receiving:     { REC: 'receptions', YDS: 'receivingYards', TD: 'receivingTouchdowns', LONG: 'longReception', TGTS: 'receivingTargets' },
+  fumbles:       { FUM: 'fumbles', LOST: 'fumblesLost', REC: 'fumblesRecovered' },
   defensive:     { TOT: 'totalTackles', SOLO: 'soloTackles', SACKS: 'sacks', TFL: 'stuffs', PD: 'passesDefended' },
   interceptions: { INT: 'interceptions', YDS: 'interceptionYards', TD: 'interceptionTouchdowns' },
   punting:       { NO: 'punts', YDS: 'puntYards', TB: 'touchbacks', 'In 20': 'puntsInside20', LONG: 'longPunt' },
@@ -1255,11 +1295,13 @@ const POS_GROUP = pos => {
 const CELL_SPEC = {
   // CMP and ATT are two cells, not a fused "216/339" — that one value was wide enough to drive the
   // whole bar's type size down, and separate cells are individually selectable.
-  qb:  ['completions', 'passingAttempts', 'passingYards', 'passingTouchdowns', 'interceptions', 'completionPct', 'QBRating'],
-  rb:  ['rushingAttempts', 'rushingYards', 'yardsPerRushAttempt', 'rushingTouchdowns', 'longRushing', 'receptions', 'receivingYards'],
-  wr:  ['receptions', 'receivingTargets', 'receivingYards', 'yardsPerReception', 'receivingTouchdowns', 'longReception'],
+  // PPR is the default fantasy pick — Standard and Half-PPR still show up in the full grid below,
+  // one click away, for a league that scores differently.
+  qb:  ['completions', 'passingAttempts', 'passingYards', 'passingTouchdowns', 'interceptions', 'completionPct', 'QBRating', 'fantasyPointsPPR'],
+  rb:  ['rushingAttempts', 'rushingYards', 'yardsPerRushAttempt', 'rushingTouchdowns', 'longRushing', 'receptions', 'receivingYards', 'fantasyPointsPPR'],
+  wr:  ['receptions', 'receivingTargets', 'receivingYards', 'yardsPerReception', 'receivingTouchdowns', 'longReception', 'fantasyPointsPPR'],
   def: ['totalTackles', 'soloTackles', 'sacks', 'stuffs', 'interceptions', 'passesDefended', 'fumblesForced'],
-  k:   ['fieldGoalsMade-fieldGoalAttempts', 'fieldGoalPct', 'longFieldGoalMade', 'extraPointsMade-extraPointAttempts', 'totalKickingPoints'],
+  k:   ['fieldGoalsMade-fieldGoalAttempts', 'fieldGoalPct', 'longFieldGoalMade', 'extraPointsMade-extraPointAttempts', 'totalKickingPoints', 'fantasyPointsPPR'],
   p:   ['punts', 'grossAvgPuntYards', 'netAvgPuntYards', 'puntsInside20', 'longPunt'],
   ol:  ['gamesPlayed'],
 };
@@ -1606,6 +1648,16 @@ async function loadModalStats() {
     modalMap = null;
     updateSendBtn();
     return;
+  }
+
+  // Not an ESPN stat name, so it never arrives via `names` on its own — added here once, after
+  // every branch above has finished assembling this timeframe's totals, so it works the same
+  // whether those came from our own aggregate() or ESPN's career endpoint.
+  if (FANTASY_GROUPS.has(group) && !names.includes('fantasyPointsPPR')) {
+    splitCompoundPairs(map);
+    Object.assign(map, fantasyPoints(map));
+    names = [...names, ...FANTASY_STAT_NAMES];
+    modalNames = names;
   }
 
   // Every stat this position returned, as [name, label, value] — the clickable grid. Ordered by the
