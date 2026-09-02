@@ -6,7 +6,7 @@
 <title>Stat Snapshot — Talkin' Giants</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&family=Archivo+Black&display=swap" rel="stylesheet">
 <style>
   /* =====================================================================================
      BRAND — this block is the single source of truth for the look, including the canvas
@@ -1937,12 +1937,15 @@ async function downloadGraphic() {
 }
 
 // =====================================================================================
-// Social card — a vertical jersey-style graphic for Instagram/X, same picks/data as the lower
-// third above, just laid out for a phone screen instead of a broadcast bar.
+// Social card — a vertical "final line" graphic for Instagram/X: framed photo on the left,
+// name and a stat stack on the right, modeled directly on the house template other Jomboy shows
+// already post (faceted navy ground, metallic name treatment, a bleeding team mark bottom-left).
 // =====================================================================================
 
 // The team's own color, sampled from its logo — the same trick the Warehouse Games tool uses to
-// style a graphic per-team without a 32-entry color table to keep in sync by hand.
+// style a graphic per-team without a 32-entry color table to keep in sync by hand. Here it only
+// tints the facets and the logo bleed; the navy ground itself stays fixed so the template reads
+// as one consistent show identity across every team, the way the reference graphic does.
 const teamColorCache = new Map();
 function colorFromLogo(img) {
   const n = 64, c = document.createElement('canvas');
@@ -1963,99 +1966,178 @@ function colorFromLogo(img) {
   }
   let best = null;
   for (const e of bins.values()) if (!best || e[0] > best[0]) best = e;
-  return best ? `rgb(${Math.round(best[1] / best[0])},${Math.round(best[2] / best[0])},${Math.round(best[3] / best[0])})` : null;
+  return best ? [Math.round(best[1] / best[0]), Math.round(best[2] / best[0]), Math.round(best[3] / best[0])] : null;
 }
-async function teamColor(abbr) {
+async function teamColorRGB(abbr) {
   const key = (abbr || '').toLowerCase();
   if (!key) return null;
   if (teamColorCache.has(key)) return teamColorCache.get(key);
   const img = await loadSafeImage(logoURL(abbr));
-  const color = img ? colorFromLogo(img) : null;
-  teamColorCache.set(key, color);
-  return color;
+  const rgb = img ? colorFromLogo(img) : null;
+  teamColorCache.set(key, rgb);
+  return rgb;
 }
 
-// Stats mode: the same cells (and order) as the lower third, capped to however many badges fit.
-// Fantasy mode: the three scoring variants side by side — only meaningful for the groups that
-// carry fantasyPoints at all (see FANTASY_GROUPS).
-const SOCIAL_MAX_CELLS = 4;
+// Stats mode: the same picks (and order) as the lower third — first five go big in the stack,
+// anything beyond that (up to MAX_PICKS) drops to the small line at the very bottom, the same way
+// the reference keeps ERA and pitch count off to the side. Fantasy mode: the three scoring variants.
+const SOCIAL_MAX_PRIMARY = 5, SOCIAL_MAX_SECONDARY = 2;
 function socialCells(mode) {
   if (mode === 'fantasy') {
     if (!modalMap || !FANTASY_GROUPS.has(modalGroup)) return [];
     return FANTASY_STAT_NAMES.filter(k => hasVal(modalMap[k])).map(k => [NICE_LABEL[k], modalMap[k]]);
   }
   const data = graphicData();
-  return data ? data.cells.slice(0, SOCIAL_MAX_CELLS) : [];
+  return data ? data.cells.slice(0, SOCIAL_MAX_PRIMARY + SOCIAL_MAX_SECONDARY) : [];
 }
 
 const SOCIAL_W = 1080, SOCIAL_H = 1350;
 
-// No custom pictograms per stat (that's a bespoke icon for every one of ~80 stat names) — the value
-// itself sits inside the badge instead, which reads fine and works for anything the grid can select.
-async function renderSocialCardCanvas(row, cells) {
-  await Promise.all([document.fonts.load('400 160px "Bebas Neue"'), document.fonts.load('500 24px "DM Mono"')]);
-  const color = (await teamColor(row.teamAbbr)) || cssVar('--accent');
+// A low-poly facet field over the navy ground — each triangle a small random lightness step off
+// the base color, so it reads as cut glass rather than a flat fill. No two exports are identical,
+// which is fine: this is a one-off download, not something that has to reproduce on request.
+function paintFacets(ctx, w, h, base) {
+  const [br, bg, bb] = base;
+  const cell = 150;
+  for (let y = -cell; y < h + cell; y += cell) {
+    for (let x = -cell; x < w + cell; x += cell) {
+      const jx = () => x + Math.random() * cell, jy = () => y + Math.random() * cell;
+      const pts = [[jx(), jy()], [jx(), jy()], [jx(), jy()], [jx(), jy()]];
+      // two triangles per cell, sharing a random diagonal
+      [[pts[0], pts[1], pts[2]], [pts[0], pts[2], pts[3]]].forEach(tri => {
+        const shade = (Math.random() - 0.5) * 34;
+        ctx.fillStyle = `rgb(${Math.max(0, br + shade) | 0},${Math.max(0, bg + shade) | 0},${Math.max(0, bb + shade) | 0})`;
+        ctx.beginPath();
+        ctx.moveTo(tri[0][0], tri[0][1]); ctx.lineTo(tri[1][0], tri[1][1]); ctx.lineTo(tri[2][0], tri[2][1]);
+        ctx.closePath(); ctx.fill();
+      });
+    }
+  }
+}
+
+async function renderSocialCardCanvas(row, cells, timeframeLabel) {
+  await Promise.all([
+    document.fonts.load('700 130px "Archivo Black"'), document.fonts.load('700 48px "Archivo Black"'),
+    document.fonts.load('500 26px "DM Mono"'), document.fonts.load('700 26px "DM Mono"'),
+  ]);
+  const teamRGB = (await teamColorRGB(row.teamAbbr)) || [26, 58, 94];
+  const logoImg = await loadSafeImage(logoURL(row.teamAbbr));
 
   const canvas = document.createElement('canvas');
   canvas.width = SOCIAL_W; canvas.height = SOCIAL_H;
   const ctx = canvas.getContext('2d');
 
-  ctx.fillStyle = color; ctx.fillRect(0, 0, SOCIAL_W, SOCIAL_H);
+  // ground: fixed navy so the template reads the same for every team, faceted for texture, the
+  // team's own color folded in at low opacity so it still shifts a little show to show
+  const NAVY = [8, 15, 26];
+  ctx.fillStyle = `rgb(${NAVY[0]},${NAVY[1]},${NAVY[2]})`; ctx.fillRect(0, 0, SOCIAL_W, SOCIAL_H);
+  const facetBase = NAVY.map((c, i) => Math.round(c * 0.7 + teamRGB[i] * 0.3));
+  paintFacets(ctx, SOCIAL_W, SOCIAL_H, facetBase);
+  const vign = ctx.createRadialGradient(SOCIAL_W * .5, SOCIAL_H * .4, 200, SOCIAL_W * .5, SOCIAL_H * .5, SOCIAL_W);
+  vign.addColorStop(0, 'rgba(8,15,26,0)'); vign.addColorStop(1, 'rgba(4,8,14,.55)');
+  ctx.fillStyle = vign; ctx.fillRect(0, 0, SOCIAL_W, SOCIAL_H);
 
-  // last name, shrunk to fit the card's width
-  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = '#fff';
-  const lastName = (row.lastName || row.name || '').toUpperCase().replace(/\./g, '');
-  let ns = 130;
-  ctx.font = `400 ${ns}px "Bebas Neue"`;
-  while (ns > 60 && ctx.measureText(lastName).width > SOCIAL_W - 160) ctx.font = `400 ${ns -= 4}px "Bebas Neue"`;
-  const nameY = 220;
-  ctx.fillText(lastName, SOCIAL_W / 2, nameY);
-
-  // shoulder-stripe accents flanking the name, echoing a jersey collar
-  const nameW = ctx.measureText(lastName).width;
-  const stripeY = nameY - ns * 0.34, stripeH = ns * 0.22, gap = 44, edge = 80;
-  ctx.fillStyle = 'rgba(255,255,255,.18)';
-  ctx.fillRect(edge, stripeY, Math.max(0, SOCIAL_W / 2 - nameW / 2 - gap - edge), stripeH);
-  ctx.fillRect(SOCIAL_W / 2 + nameW / 2 + gap, stripeY, Math.max(0, SOCIAL_W - edge - (SOCIAL_W / 2 + nameW / 2 + gap)), stripeH);
-
-  // jersey number, huge, with a soft dark outline so it reads as printed felt rather than flat type
-  const numText = row.number ? String(row.number) : '';
-  if (numText) {
-    let vs = 640;
-    ctx.font = `400 ${vs}px "Bebas Neue"`;
-    while (vs > 320 && ctx.measureText(numText).width > SOCIAL_W - 160) ctx.font = `400 ${vs -= 10}px "Bebas Neue"`;
-    const numY = 800;
-    ctx.lineWidth = 10; ctx.strokeStyle = 'rgba(0,0,0,.25)';
-    ctx.strokeText(numText, SOCIAL_W / 2, numY);
-    ctx.fillStyle = '#fff';
-    ctx.fillText(numText, SOCIAL_W / 2, numY);
+  // team mark, bleeding off the bottom-left corner, behind the photo frame
+  if (logoImg) {
+    const ls = 620;
+    ctx.save(); ctx.globalAlpha = .92;
+    ctx.drawImage(logoImg, -140, SOCIAL_H - ls + 280, ls, ls);
+    ctx.restore();
   }
 
-  // stat badges along the bottom
-  const n = Math.max(cells.length, 1), badgeR = 82, badgeY = 1090, spacing = SOCIAL_W / (n + 1);
-  cells.forEach(([label, value], i) => {
-    const cx = spacing * (i + 1);
-    ctx.beginPath(); ctx.arc(cx, badgeY, badgeR, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff'; ctx.fill();
+  // headshot, cover-fit into a rounded portrait frame with a white border like a printed photo
+  const PX = 60, PY = 108, PW = 486, PH = 636, PR = 26;
+  ctx.save();
+  roundRectPath(ctx, PX - 9, PY - 9, PW + 18, PH + 18, PR + 6);
+  ctx.fillStyle = '#f4f4f2'; ctx.fill();
+  ctx.restore();
+  const headImg = await loadSafeImage(headshotURL(row.id));
+  ctx.save();
+  roundRectPath(ctx, PX, PY, PW, PH, PR);
+  ctx.clip();
+  ctx.fillStyle = '#0d1b2e'; ctx.fillRect(PX, PY, PW, PH);
+  if (headImg) {
+    const scale = Math.max(PW / headImg.width, PH / headImg.height);
+    const iw = headImg.width * scale, ih = headImg.height * scale;
+    ctx.drawImage(headImg, PX + (PW - iw) / 2, PY + (PH - ih) * 0.28, iw, ih);
+  }
+  ctx.restore();
 
-    ctx.fillStyle = color;
-    let vs2 = 58;
-    ctx.font = `400 ${vs2}px "Bebas Neue"`;
-    while (vs2 > 26 && ctx.measureText(String(value)).width > badgeR * 1.7) ctx.font = `400 ${vs2 -= 4}px "Bebas Neue"`;
-    ctx.fillText(String(value), cx, badgeY + vs2 * 0.34);
+  // wordmark, top-left — same small brand tag every export in this app carries
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = '700 15px "DM Mono"';
+  ctx.fillText(WORDMARK, PX, 46);
 
+  // name: first name small and silver, last name huge with a brushed-steel gradient — right
+  // column is centered so it holds up whether the name is four letters or a hyphenated dozen
+  const RX0 = PX + PW + 34, RX1 = SOCIAL_W - 40, RCX = (RX0 + RX1) / 2, RW = RX1 - RX0;
+  ctx.textAlign = 'center';
+  // strip the known last name off the end rather than just dropping the final word — "St. Brown"
+  // is two words, and a naive last-token split would leave "St." stuck on the first name
+  const fullName = row.name || '';
+  const firstName = (row.lastName && fullName.endsWith(row.lastName)
+    ? fullName.slice(0, fullName.length - row.lastName.length)
+    : fullName.split(' ').slice(0, -1).join(' ')).trim().toUpperCase() || fullName.toUpperCase();
+  ctx.fillStyle = '#aab4c4'; ctx.font = '700 40px "Archivo Black"';
+  ctx.fillText(firstName, RCX, 176);
+
+  const lastName = (row.lastName || row.name || '').toUpperCase().replace(/\./g, '');
+  let ns = 108;
+  ctx.font = `700 ${ns}px "Archivo Black"`;
+  while (ns > 52 && ctx.measureText(lastName).width > RW) ctx.font = `700 ${ns -= 4}px "Archivo Black"`;
+  const nameGrad = ctx.createLinearGradient(0, 210, 0, 300);
+  nameGrad.addColorStop(0, '#ffffff'); nameGrad.addColorStop(.55, '#dfe4ea'); nameGrad.addColorStop(1, '#aab4c2');
+  ctx.fillStyle = nameGrad;
+  ctx.fillText(lastName, RCX, 296);
+
+  if (timeframeLabel) {
+    ctx.font = '700 25px "DM Mono"'; ctx.fillStyle = '#fff';
+    let ts = 25, label = timeframeLabel.toUpperCase();
+    ctx.font = `700 ${ts}px "DM Mono"`;
+    while (ts > 14 && ctx.measureText(label).width > RW) ctx.font = `700 ${ts -= 1}px "DM Mono"`;
+    ctx.fillText(label, RCX, 336);
+  }
+
+  // stat stack: a huge value over a dark label pill, filling the column below the name
+  const primary = cells.slice(0, SOCIAL_MAX_PRIMARY), secondary = cells.slice(SOCIAL_MAX_PRIMARY);
+  const stackTop = 380, stackBottom = secondary.length ? 1244 : 1290;
+  const slotH = (stackBottom - stackTop) / Math.max(primary.length, 1);
+  primary.forEach(([label, value], i) => {
+    const slotY = stackTop + slotH * i;
+    let vs = Math.min(118, slotH * 0.66);
+    ctx.font = `700 ${vs}px "Archivo Black"`;
+    while (vs > 40 && ctx.measureText(String(value)).width > RW - 20) ctx.font = `700 ${vs -= 4}px "Archivo Black"`;
     ctx.fillStyle = '#fff';
-    const labelText = String(label).toUpperCase();
-    let ls = 22;
-    ctx.font = `500 ${ls}px "DM Mono"`;
-    while (ls > 12 && ctx.measureText(labelText).width > spacing - 12) ctx.font = `500 ${ls -= 1}px "DM Mono"`;
-    ctx.fillText(labelText, cx, badgeY + badgeR + 42);
+    ctx.fillText(String(value), RCX, slotY + vs * 0.92);
+
+    const pillH = Math.min(46, slotH * 0.28), pillY = slotY + vs * 0.92 + 16;
+    ctx.fillStyle = 'rgba(0,0,0,.4)';
+    roundRectPath(ctx, RX0, pillY, RW, pillH, 5); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = `700 ${Math.round(pillH * 0.42)}px "DM Mono"`;
+    ctx.fillText(String(label).toUpperCase(), RCX, pillY + pillH * 0.67);
   });
 
-  ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '500 18px "DM Mono"';
-  ctx.fillText(WORDMARK, SOCIAL_W - 32, SOCIAL_H - 26);
+  if (secondary.length) {
+    ctx.font = '700 28px "Archivo Black"';
+    const parts = secondary.map(([label, value]) => `${value} ${String(label).toUpperCase()}`);
+    const gap = 26;
+    const widths = parts.map(p => ctx.measureText(p).width);
+    let cx = RCX - (widths.reduce((a, b) => a + b, 0) + gap * (parts.length - 1)) / 2;
+    ctx.textAlign = 'left'; ctx.fillStyle = '#fff';
+    parts.forEach((p, i) => { ctx.fillText(p, cx, 1284); cx += widths[i] + gap; });
+  }
 
   return canvas;
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 async function downloadSocialCard() {
@@ -2070,7 +2152,7 @@ async function downloadSocialCard() {
   btn.disabled = true;
   if (note) note.textContent = 'Building social card…';
   try {
-    const canvas = await renderSocialCardCanvas(modalRow, cells);
+    const canvas = await renderSocialCardCanvas(modalRow, cells, socialMode === 'fantasy' ? 'Fantasy Points' : modalLabel);
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
     if (!blob) throw new Error('Canvas export failed');
     const a = el('a');
