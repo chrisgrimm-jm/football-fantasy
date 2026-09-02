@@ -184,6 +184,18 @@
     width:22px;height:22px;flex:none;padding:0;font-size:11px;line-height:1;cursor:pointer}
   .photo-drop-clear:hover{border-color:var(--red);color:var(--red)}
 
+  /* ---- Social PNG: frame/zoom the active photo before exporting ---- */
+  .photo-frame-editor{display:flex;gap:14px;align-items:flex-start;margin:10px 0 0;
+    border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;background:var(--surface)}
+  #photoPreviewCanvas{flex:none;border-radius:4px;border:1px solid var(--border2);cursor:grab;
+    touch-action:none;background:var(--surface3)}
+  #photoPreviewCanvas:active{cursor:grabbing}
+  .pf-controls{display:flex;flex-direction:column;gap:8px;flex:1;min-width:0}
+  .pf-controls label{margin:0}
+  .pf-controls input[type=range]{width:100%;accent-color:var(--accent)}
+  .pf-hint{font-family:var(--font-mono);font-size:9px;letter-spacing:.06em;color:var(--text3);
+    text-transform:uppercase}
+
   .modal-export-row{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 4px}
   .modal-export-btn{background:var(--accent);color:var(--white);border:1px solid var(--accent);
     border-radius:var(--radius);padding:11px 18px;font-family:var(--font-display);font-weight:400;
@@ -400,6 +412,15 @@
         title="Use the ESPN headshot instead">✕</button>
       <input type="file" id="photoInput" accept="image/*" hidden>
     </div>
+    <div class="photo-frame-editor" id="photoFrameEditor">
+      <canvas id="photoPreviewCanvas" width="162" height="212" title="Drag to reposition"></canvas>
+      <div class="pf-controls">
+        <label for="photoZoomSlider">Zoom</label>
+        <input type="range" id="photoZoomSlider" min="100" max="250" value="100" step="5">
+        <button type="button" id="photoResetBtn" title="Reset zoom and position">Reset</button>
+        <span class="pf-hint">Drag the photo to reposition</span>
+      </div>
+    </div>
     <div class="modal-export-row" id="modalExportRow">
       <button id="modalSend" class="modal-export-btn" type="button" hidden
         title="Put this stat line on the OBS lower third">▶ Send to OBS</button>
@@ -440,6 +461,7 @@
 
 // The umbrella brand's wordmark, baked into the bar and the PNG. Colours live in :root above.
 const WORDMARK = "JM FOOTBALL";
+const JMF_LOGO_URL = 'assets/jmf-logo.png';   // the umbrella brand's badge, on the Social card
 
 // ESPN's public endpoints — no API key. Everything we actually fetch (rosters, game logs, career
 // stats) sends Access-Control-Allow-Origin, so this works straight off GitHub Pages with no proxy.
@@ -1999,6 +2021,9 @@ function setSocialPhoto(file) {
     $('photoDropText').textContent = `Using: ${file.name}`;
     $('photoDrop').classList.add('has-photo');
     $('photoDropClear').hidden = false;
+    resetSocialPhotoFraming();
+    socialActivePhoto = img;
+    repaintPhotoPreview();
   };
   img.src = URL.createObjectURL(file);
 }
@@ -2008,6 +2033,28 @@ function clearSocialPhoto() {
   $('photoDrop').classList.remove('has-photo');
   $('photoDropClear').hidden = true;
   $('photoInput').value = '';
+  resetSocialPhotoFraming();
+  if (modalRow) loadActiveSocialPhoto(modalRow).then(repaintPhotoPreview);
+}
+function resetSocialPhotoFraming() {
+  socialPhotoZoom = 1; socialPhotoOffsetX = 0; socialPhotoOffsetY = 0;
+  const slider = $('photoZoomSlider'); if (slider) slider.value = 100;
+}
+
+// Redraws the small draggable preview from the same frame math the full export uses, so what the
+// producer sees while adjusting zoom/position is exactly what ends up in the PNG.
+function repaintPhotoPreview() {
+  const canvas = $('photoPreviewCanvas');
+  if (!canvas || !socialActivePhoto) return;
+  clampSocialPhotoOffset(socialActivePhoto, SOCIAL_PHOTO, socialPhotoZoom);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  const s = canvas.width / SOCIAL_PHOTO.w;
+  ctx.scale(s, s);
+  ctx.translate(-SOCIAL_PHOTO.x, -SOCIAL_PHOTO.y);
+  drawSocialPhoto(ctx, socialActivePhoto, SOCIAL_PHOTO, socialPhotoZoom);
+  ctx.restore();
 }
 
 // Same picks (and order) as the lower third — including fantasy points, since PPR is just another
@@ -2020,6 +2067,37 @@ function socialCells() {
 }
 
 const SOCIAL_W = 1080, SOCIAL_H = 1350;
+const SOCIAL_PHOTO = { x: 60, y: 108, w: 486, h: 636, r: 26 };
+
+// Producer-adjustable framing for whichever photo is active (custom or ESPN headshot) — a zoom
+// multiple over the minimum cover-fit scale, plus a pixel offset in the main canvas's own
+// coordinate space, so the preview and the final export can share the exact same math.
+let socialPhotoZoom = 1;
+let socialPhotoOffsetX = 0, socialPhotoOffsetY = 0;
+let socialActivePhoto = null;   // the resolved Image currently being framed, or null until loaded
+
+function clampSocialPhotoOffset(img, frame, zoom) {
+  const baseScale = Math.max(frame.w / img.width, frame.h / img.height);
+  const scale = baseScale * zoom;
+  const iw = img.width * scale, ih = img.height * scale;
+  const maxOx = Math.max(0, (iw - frame.w) / 2), maxOy = Math.max(0, (ih - frame.h) / 2);
+  socialPhotoOffsetX = Math.max(-maxOx, Math.min(maxOx, socialPhotoOffsetX));
+  socialPhotoOffsetY = Math.max(-maxOy, Math.min(maxOy, socialPhotoOffsetY));
+}
+function drawSocialPhoto(ctx, img, frame, zoom) {
+  const baseScale = Math.max(frame.w / img.width, frame.h / img.height);
+  const scale = baseScale * zoom;
+  const iw = img.width * scale, ih = img.height * scale;
+  ctx.drawImage(img, frame.x + (frame.w - iw) / 2 + socialPhotoOffsetX,
+    frame.y + (frame.h - ih) / 2 + socialPhotoOffsetY, iw, ih);
+}
+
+// Resolves whichever photo is currently in play (a dropped-in licensed photo wins over the ESPN
+// headshot) and caches it so the live preview and the final render never refetch mid-adjustment.
+async function loadActiveSocialPhoto(row) {
+  socialActivePhoto = socialCustomPhoto || await loadSafeImage(headshotURL(row.id));
+  return socialActivePhoto;
+}
 
 async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   await Promise.all([
@@ -2028,6 +2106,7 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   ]);
   const teamRGB = (await teamColorRGB(row.teamAbbr)) || [26, 58, 94];
   const logoImg = await loadSafeImage(logoURL(row.teamAbbr));
+  const jmfLogoImg = await loadSafeImage(JMF_LOGO_URL);
 
   const canvas = document.createElement('canvas');
   canvas.width = SOCIAL_W; canvas.height = SOCIAL_H;
@@ -2036,33 +2115,36 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   // ground: a flat fill of the team's own color, sampled straight from its logo
   ctx.fillStyle = `rgb(${teamRGB[0]},${teamRGB[1]},${teamRGB[2]})`; ctx.fillRect(0, 0, SOCIAL_W, SOCIAL_H);
 
-  // team mark, bleeding off the bottom-left corner, behind the photo frame
+  // team mark, bleeding off the bottom-left corner, close under the photo frame — behind it,
+  // so the frame's white border overlaps the top of the mark — with the JM Football badge
+  // sitting just below it, small and fully in frame rather than bled off an edge
+  const { x: PX, y: PY, w: PW, h: PH, r: PR } = SOCIAL_PHOTO;
+  const teamLogoBottom = PY + PH - 130 + 460;
   if (logoImg) {
-    const ls = 620;
+    const ls = 460;
     ctx.save(); ctx.globalAlpha = .92;
-    ctx.drawImage(logoImg, -140, SOCIAL_H - ls + 280, ls, ls);
+    ctx.drawImage(logoImg, -120, PY + PH - 130, ls, ls);
     ctx.restore();
   }
+  if (jmfLogoImg) {
+    const js = 130;
+    ctx.drawImage(jmfLogoImg, PX, teamLogoBottom + 24, js, js);
+  }
 
-  // headshot, cover-fit into a rounded portrait frame with a white border like a printed photo
-  const PX = 60, PY = 108, PW = 486, PH = 636, PR = 26;
+  // headshot, cover-fit into a rounded portrait frame with a white border like a printed photo —
+  // zoom/position are whatever the producer set in the framing preview under the timeframe pills
   ctx.save();
   roundRectPath(ctx, PX - 9, PY - 9, PW + 18, PH + 18, PR + 6);
   ctx.fillStyle = '#f4f4f2'; ctx.fill();
   ctx.restore();
-  // a dropped-in licensed photo wins over the ESPN headshot — see the drop zone under the timeframe
-  // pills. Action photos tend to frame the subject more centrally than a studio headshot does, so
-  // it gets a centered crop instead of the headshot's face-near-top bias.
-  const headImg = socialCustomPhoto || await loadSafeImage(headshotURL(row.id));
-  const vBias = socialCustomPhoto ? 0.5 : 0.28;
+  const headImg = socialActivePhoto || await loadActiveSocialPhoto(row);
   ctx.save();
   roundRectPath(ctx, PX, PY, PW, PH, PR);
   ctx.clip();
   ctx.fillStyle = '#0d1b2e'; ctx.fillRect(PX, PY, PW, PH);
   if (headImg) {
-    const scale = Math.max(PW / headImg.width, PH / headImg.height);
-    const iw = headImg.width * scale, ih = headImg.height * scale;
-    ctx.drawImage(headImg, PX + (PW - iw) / 2, PY + (PH - ih) * vBias, iw, ih);
+    clampSocialPhotoOffset(headImg, SOCIAL_PHOTO, socialPhotoZoom);
+    drawSocialPhoto(ctx, headImg, SOCIAL_PHOTO, socialPhotoZoom);
   }
   ctx.restore();
 
@@ -2347,6 +2429,29 @@ $('photoDrop').ondrop = e => {
   const file = e.dataTransfer.files && e.dataTransfer.files[0];
   if (file) setSocialPhoto(file);
 };
+$('photoZoomSlider').oninput = () => {
+  socialPhotoZoom = +$('photoZoomSlider').value / 100;
+  repaintPhotoPreview();
+};
+$('photoResetBtn').onclick = () => { resetSocialPhotoFraming(); repaintPhotoPreview(); };
+// pointer events unify mouse + touch dragging on the preview in one listener set
+(() => {
+  const pv = $('photoPreviewCanvas');
+  let dragging = false, start = null;
+  pv.onpointerdown = e => {
+    dragging = true;
+    start = { x: e.clientX, y: e.clientY, ox: socialPhotoOffsetX, oy: socialPhotoOffsetY };
+    pv.setPointerCapture(e.pointerId);
+  };
+  pv.onpointermove = e => {
+    if (!dragging) return;
+    const s = pv.width / SOCIAL_PHOTO.w;
+    socialPhotoOffsetX = start.ox + (e.clientX - start.x) / s;
+    socialPhotoOffsetY = start.oy + (e.clientY - start.y) / s;
+    repaintPhotoPreview();
+  };
+  pv.onpointerup = () => { dragging = false; };
+})();
 $('modalBackdrop').onclick = e => { if (e.target.id === 'modalBackdrop') closeModal(); };
 document.onkeydown = e => { if (e.key === 'Escape' && !$('modalBackdrop').hidden) closeModal(); };
 $('openDisplay').onclick = () => {
