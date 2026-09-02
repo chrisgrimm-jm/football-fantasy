@@ -382,6 +382,10 @@
       <select id="preGameSelect"></select>
     </div>
     <div id="modalBody" class="modal-body"></div>
+    <div class="tf-pills" id="socialToggle" title="What the social card's bottom badges show">
+      <button type="button" class="tf-pill on" data-mode="stats">CARD: STATS</button>
+      <button type="button" class="tf-pill" data-mode="fantasy">CARD: FANTASY</button>
+    </div>
     <div class="modal-export-row" id="modalExportRow">
       <button id="modalSend" class="modal-export-btn" type="button" hidden
         title="Put this stat line on the OBS lower third">▶ Send to OBS</button>
@@ -389,6 +393,8 @@
         title="Push the current selection to the graphic that's already on air">↻ Update Graphic</button>
       <button id="modalDownload" class="modal-export-btn" type="button" hidden
         title="Download this stat line as a PNG lower third">⬇ Save PNG</button>
+      <button id="modalSocialDownload" class="modal-export-btn" type="button" hidden
+        title="Download a vertical jersey-style card for Instagram/X">📱 Social PNG</button>
     </div>
     <div id="modalDlNote" class="modal-dlnote"></div>
   </div>
@@ -641,6 +647,7 @@ function slimRoster(data) {
       rows.push({
         id: String(a.id),
         name: a.fullName || a.displayName || '',
+        lastName: a.lastName || '',
         pos: (a.position && a.position.abbreviation) || '',
         number: a.jersey || '',
         group: g.position,
@@ -694,7 +701,7 @@ function paintRoster() {
   const { team, rows } = rosterState;
   currentIndex = new Map();
   rows.forEach(r => currentIndex.set(r.id, {
-    id: r.id, name: r.name, pos: r.pos, team: team ? team.name : '',
+    id: r.id, name: r.name, lastName: r.lastName, pos: r.pos, number: r.number, team: team ? team.name : '',
     teamAbbr: team ? team.abbr : '', teamId: team ? team.id : null,
   }));
 
@@ -769,7 +776,7 @@ async function buildPlayerIndex() {
       try {
         const rows = slimRoster(await jc(`${SITE}/teams/${id}/roster`));
         rows.forEach(r => allPlayers.push({
-          id: r.id, name: r.name, pos: r.pos, number: r.number,
+          id: r.id, name: r.name, lastName: r.lastName, pos: r.pos, number: r.number,
           teamId: id, teamName: team ? team.name : '', teamAbbr: team ? team.abbr : '',
         }));
         indexedTeams.add(id);
@@ -850,8 +857,8 @@ function paintSearch() {
     const rows = active && active.key ? sortRows(players, active.key, active.dir)
                                       : [...players].sort((a, b) => a.name.localeCompare(b.name));
     rows.forEach(p => {
-      currentIndex.set(p.id, { id: p.id, name: p.name, pos: p.pos, team: p.teamName,
-                               teamAbbr: p.teamAbbr, teamId: p.teamId });
+      currentIndex.set(p.id, { id: p.id, name: p.name, lastName: p.lastName, pos: p.pos, number: p.number,
+                               team: p.teamName, teamAbbr: p.teamAbbr, teamId: p.teamId });
       const tr = el('tr'); tr.dataset.pid = p.id;
       tr.appendChild(el('td', 'num', p.number));
       tr.appendChild(el('td', 'name', p.name));
@@ -1384,6 +1391,7 @@ let modalLog = null, modalCareer = null, modalCareerGames = null, modalPreseason
 let modalMap = null, modalNames = null, modalLabel = '', modalSub = '';
 let modalOpp = '';
 let modalPreGame = '';           // '' = every preseason game added up; otherwise an index into modalPreseason.games
+let socialMode = 'stats';        // what the social card's bottom badges show: 'stats' or 'fantasy'
 // Which stats are on the bar, in bar order. Seeded from the position defaults each time a new
 // player is opened, then whatever the producer has clicked. Kept across timeframe changes for the
 // same player — flipping to LAST 3 shouldn't undo a selection you just made.
@@ -1394,9 +1402,10 @@ async function openPlayerModal(pid) {
   const row = currentIndex.get(String(pid));
   if (!row) return;
   const samePlayer = modalPid === String(pid);
-  modalPid = String(pid); modalRow = row; modalTf = 'season'; modalOpp = ''; modalPreGame = '';
+  modalPid = String(pid); modalRow = row; modalTf = 'season'; modalOpp = ''; modalPreGame = ''; socialMode = 'stats';
   if (!samePlayer) modalPicks = [];      // new player: back to that position's defaults
   modalLog = modalCareer = modalCareerGames = modalPreseason = null;
+  [...$('socialToggle').children].forEach(c => c.classList.toggle('on', c.dataset.mode === socialMode));
   $('modalDlNote').textContent = '';
   $('modalHeadshot').src = headshotURL(pid);
   $('modalHeadshot').onerror = function () { this.style.visibility = 'hidden'; };
@@ -1772,7 +1781,7 @@ function updateOnAirUI(payload) {
 const onThisPlayer = () => !!onAirPid && String(onAirPid) === String(modalPid);
 
 function updateSendBtn() {
-  const btn = $('modalSend'), updBtn = $('modalUpdate'), dl = $('modalDownload');
+  const btn = $('modalSend'), updBtn = $('modalUpdate'), dl = $('modalDownload'), sc = $('modalSocialDownload');
   if (!btn) return;
   const has = !!graphicData();
   const live = onThisPlayer();
@@ -1781,6 +1790,7 @@ function updateSendBtn() {
   btn.classList.toggle('live', live);
   if (updBtn) updBtn.hidden = !(live && has);
   if (dl) dl.hidden = !has;
+  if (sc) sc.hidden = !has;
 }
 
 // Nothing reaches OBS until Send is pressed. Browsing players and flipping through timeframes is
@@ -1921,6 +1931,155 @@ async function downloadGraphic() {
     if (note) note.textContent = hadPhoto ? 'Downloaded ✓' : 'Downloaded ✓ (headshot host blocked embedding — saved without it)';
   } catch (e) {
     if (note) note.textContent = 'Could not build the graphic: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// =====================================================================================
+// Social card — a vertical jersey-style graphic for Instagram/X, same picks/data as the lower
+// third above, just laid out for a phone screen instead of a broadcast bar.
+// =====================================================================================
+
+// The team's own color, sampled from its logo — the same trick the Warehouse Games tool uses to
+// style a graphic per-team without a 32-entry color table to keep in sync by hand.
+const teamColorCache = new Map();
+function colorFromLogo(img) {
+  const n = 64, c = document.createElement('canvas');
+  c.width = c.height = n;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  x.drawImage(img, 0, 0, n, n);
+  let d;
+  try { d = x.getImageData(0, 0, n, n).data; } catch { return null; }   // a tainted canvas throws
+  const bins = new Map();
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    if (d[i + 3] < 200) continue;
+    const hi = Math.max(r, g, b), lo = Math.min(r, g, b);
+    if (hi - lo < 45 || hi < 70) continue;   // black outlines, white fills and greys aren't "the" color
+    const k = (r >> 4) * 256 + (g >> 4) * 16 + (b >> 4);
+    const e = bins.get(k) || [0, 0, 0, 0];
+    e[0]++; e[1] += r; e[2] += g; e[3] += b; bins.set(k, e);
+  }
+  let best = null;
+  for (const e of bins.values()) if (!best || e[0] > best[0]) best = e;
+  return best ? `rgb(${Math.round(best[1] / best[0])},${Math.round(best[2] / best[0])},${Math.round(best[3] / best[0])})` : null;
+}
+async function teamColor(abbr) {
+  const key = (abbr || '').toLowerCase();
+  if (!key) return null;
+  if (teamColorCache.has(key)) return teamColorCache.get(key);
+  const img = await loadSafeImage(logoURL(abbr));
+  const color = img ? colorFromLogo(img) : null;
+  teamColorCache.set(key, color);
+  return color;
+}
+
+// Stats mode: the same cells (and order) as the lower third, capped to however many badges fit.
+// Fantasy mode: the three scoring variants side by side — only meaningful for the groups that
+// carry fantasyPoints at all (see FANTASY_GROUPS).
+const SOCIAL_MAX_CELLS = 4;
+function socialCells(mode) {
+  if (mode === 'fantasy') {
+    if (!modalMap || !FANTASY_GROUPS.has(modalGroup)) return [];
+    return FANTASY_STAT_NAMES.filter(k => hasVal(modalMap[k])).map(k => [NICE_LABEL[k], modalMap[k]]);
+  }
+  const data = graphicData();
+  return data ? data.cells.slice(0, SOCIAL_MAX_CELLS) : [];
+}
+
+const SOCIAL_W = 1080, SOCIAL_H = 1350;
+
+// No custom pictograms per stat (that's a bespoke icon for every one of ~80 stat names) — the value
+// itself sits inside the badge instead, which reads fine and works for anything the grid can select.
+async function renderSocialCardCanvas(row, cells) {
+  await Promise.all([document.fonts.load('400 160px "Bebas Neue"'), document.fonts.load('500 24px "DM Mono"')]);
+  const color = (await teamColor(row.teamAbbr)) || cssVar('--accent');
+
+  const canvas = document.createElement('canvas');
+  canvas.width = SOCIAL_W; canvas.height = SOCIAL_H;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = color; ctx.fillRect(0, 0, SOCIAL_W, SOCIAL_H);
+
+  // last name, shrunk to fit the card's width
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = '#fff';
+  const lastName = (row.lastName || row.name || '').toUpperCase().replace(/\./g, '');
+  let ns = 130;
+  ctx.font = `400 ${ns}px "Bebas Neue"`;
+  while (ns > 60 && ctx.measureText(lastName).width > SOCIAL_W - 160) ctx.font = `400 ${ns -= 4}px "Bebas Neue"`;
+  const nameY = 220;
+  ctx.fillText(lastName, SOCIAL_W / 2, nameY);
+
+  // shoulder-stripe accents flanking the name, echoing a jersey collar
+  const nameW = ctx.measureText(lastName).width;
+  const stripeY = nameY - ns * 0.34, stripeH = ns * 0.22, gap = 44, edge = 80;
+  ctx.fillStyle = 'rgba(255,255,255,.18)';
+  ctx.fillRect(edge, stripeY, Math.max(0, SOCIAL_W / 2 - nameW / 2 - gap - edge), stripeH);
+  ctx.fillRect(SOCIAL_W / 2 + nameW / 2 + gap, stripeY, Math.max(0, SOCIAL_W - edge - (SOCIAL_W / 2 + nameW / 2 + gap)), stripeH);
+
+  // jersey number, huge, with a soft dark outline so it reads as printed felt rather than flat type
+  const numText = row.number ? String(row.number) : '';
+  if (numText) {
+    let vs = 640;
+    ctx.font = `400 ${vs}px "Bebas Neue"`;
+    while (vs > 320 && ctx.measureText(numText).width > SOCIAL_W - 160) ctx.font = `400 ${vs -= 10}px "Bebas Neue"`;
+    const numY = 800;
+    ctx.lineWidth = 10; ctx.strokeStyle = 'rgba(0,0,0,.25)';
+    ctx.strokeText(numText, SOCIAL_W / 2, numY);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(numText, SOCIAL_W / 2, numY);
+  }
+
+  // stat badges along the bottom
+  const n = Math.max(cells.length, 1), badgeR = 82, badgeY = 1090, spacing = SOCIAL_W / (n + 1);
+  cells.forEach(([label, value], i) => {
+    const cx = spacing * (i + 1);
+    ctx.beginPath(); ctx.arc(cx, badgeY, badgeR, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff'; ctx.fill();
+
+    ctx.fillStyle = color;
+    let vs2 = 58;
+    ctx.font = `400 ${vs2}px "Bebas Neue"`;
+    while (vs2 > 26 && ctx.measureText(String(value)).width > badgeR * 1.7) ctx.font = `400 ${vs2 -= 4}px "Bebas Neue"`;
+    ctx.fillText(String(value), cx, badgeY + vs2 * 0.34);
+
+    ctx.fillStyle = '#fff';
+    const labelText = String(label).toUpperCase();
+    let ls = 22;
+    ctx.font = `500 ${ls}px "DM Mono"`;
+    while (ls > 12 && ctx.measureText(labelText).width > spacing - 12) ctx.font = `500 ${ls -= 1}px "DM Mono"`;
+    ctx.fillText(labelText, cx, badgeY + badgeR + 42);
+  });
+
+  ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '500 18px "DM Mono"';
+  ctx.fillText(WORDMARK, SOCIAL_W - 32, SOCIAL_H - 26);
+
+  return canvas;
+}
+
+async function downloadSocialCard() {
+  const note = $('modalDlNote'), btn = $('modalSocialDownload');
+  if (!modalRow) return;
+  const cells = socialCells(socialMode);
+  if (!cells.length) {
+    if (note) note.textContent = socialMode === 'fantasy'
+      ? 'No fantasy points for this position.' : 'Nothing to put on the card for this timeframe.';
+    return;
+  }
+  btn.disabled = true;
+  if (note) note.textContent = 'Building social card…';
+  try {
+    const canvas = await renderSocialCardCanvas(modalRow, cells);
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    if (!blob) throw new Error('Canvas export failed');
+    const a = el('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${modalRow.name.replace(/[^\w\d]+/g, '-')}-social-${socialMode}.png`;
+    a.click(); URL.revokeObjectURL(a.href);
+    if (note) note.textContent = 'Downloaded ✓';
+  } catch (e) {
+    if (note) note.textContent = 'Could not build the card: ' + e.message;
   } finally {
     btn.disabled = false;
   }
@@ -2097,6 +2256,12 @@ $('modalClose').onclick = closeModal;
 $('modalSend').onclick = toggleObs;
 $('modalUpdate').onclick = () => pushGraphic('Updated ✓');
 $('modalDownload').onclick = downloadGraphic;
+$('modalSocialDownload').onclick = downloadSocialCard;
+$('socialToggle').onclick = e => {
+  const b = e.target.closest('button[data-mode]'); if (!b) return;
+  socialMode = b.dataset.mode;
+  [...$('socialToggle').children].forEach(c => c.classList.toggle('on', c === b));
+};
 $('modalBackdrop').onclick = e => { if (e.target.id === 'modalBackdrop') closeModal(); };
 document.onkeydown = e => { if (e.key === 'Escape' && !$('modalBackdrop').hidden) closeModal(); };
 $('openDisplay').onclick = () => {
