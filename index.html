@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Stat Snapshot — Talkin' Giants</title>
+<title>Stat Snapshot — JM Football</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&family=Archivo+Black&display=swap" rel="stylesheet">
@@ -14,8 +14,8 @@
      Change a hex here and the whole app + both graphics follow.
      ===================================================================================== */
   :root{
-    --brand:#003981;          /* Talkin' Giants blue */
-    --accent:#c9243f;         /* Giants red — top rule, active pills, buttons */
+    --brand:#003981;          /* JM Football navy */
+    --accent:#c9243f;         /* JM Football red — top rule, active pills, buttons */
     --label:#8fbdf0;          /* small-caps stat labels; light blue reads far better on blue than red */
 
     /* the lower-third gradient sweep, derived from --brand */
@@ -128,7 +128,6 @@
     border-radius:var(--radius);padding:9px 12px;background:var(--surface);cursor:pointer;
     text-align:left;transition:all .15s}
   .team-card:hover{border-color:rgba(143,189,240,.45);background:var(--surface2)}
-  .team-card.home{border-color:rgba(201,36,63,.55)}
   .team-card img{width:28px;height:28px;object-fit:contain;flex:none}
   .team-card .tname{font-family:var(--font-display);font-weight:400;font-size:16px;
     letter-spacing:.04em;line-height:1.1;color:var(--text)}
@@ -171,6 +170,19 @@
   .oppRow{margin:0 0 16px}
   .oppRow[hidden]{display:none}
   .oppRow select{font-family:var(--font-mono);font-size:12px;padding:6px 9px}
+
+  /* ---- Social PNG: optional Getty/licensed photo, dropped in over the ESPN headshot ---- */
+  .photo-drop{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    border:1px dashed var(--border2);border-radius:var(--radius);padding:10px 14px;margin:14px 0 0;
+    cursor:pointer;transition:all .15s}
+  .photo-drop:hover{border-color:rgba(143,189,240,.5);background:rgba(143,189,240,.05)}
+  .photo-drop.drag{border-color:var(--accent);background:var(--accent-dim);border-style:solid}
+  .photo-drop.has-photo{border-style:solid;border-color:rgba(95,221,170,.5)}
+  .photo-drop span{font-family:var(--font-mono);font-size:11px;letter-spacing:.05em;color:var(--text2)}
+  .photo-drop.has-photo span{color:var(--green)}
+  .photo-drop-clear{background:none;border:1px solid var(--border);color:var(--text2);border-radius:50%;
+    width:22px;height:22px;flex:none;padding:0;font-size:11px;line-height:1;cursor:pointer}
+  .photo-drop-clear:hover{border-color:var(--red);color:var(--red)}
 
   .modal-export-row{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 4px}
   .modal-export-btn{background:var(--accent);color:var(--white);border:1px solid var(--accent);
@@ -320,11 +332,10 @@
 <body>
 <header>
   <div class="datanote" id="datanote">Data <b>Live via ESPN</b></div>
-  <div class="eyebrow">Talkin' Giants</div>
+  <div class="eyebrow">JM Football</div>
   <div class="titlerow">
     <h1>STAT SNAPSHOT<span>.</span></h1>
     <button id="goHome" class="home-btn" type="button" title="Back to all 32 teams">⌂ All Teams</button>
-    <button id="goGiants" class="home-btn" type="button" title="Jump to the Giants roster">Giants</button>
     <div class="teambadge" id="teambadge"></div>
   </div>
   <div class="controls">
@@ -386,6 +397,13 @@
       <button type="button" class="tf-pill on" data-mode="stats">CARD: STATS</button>
       <button type="button" class="tf-pill" data-mode="fantasy">CARD: FANTASY</button>
     </div>
+    <div class="photo-drop" id="photoDrop"
+      title="Drag a licensed photo here, or click, to use on the Social PNG instead of the ESPN headshot">
+      <span id="photoDropText">＋ Drop a photo for the Social card (optional — uses the ESPN headshot otherwise)</span>
+      <button type="button" id="photoDropClear" class="photo-drop-clear" hidden
+        title="Use the ESPN headshot instead">✕</button>
+      <input type="file" id="photoInput" accept="image/*" hidden>
+    </div>
     <div class="modal-export-row" id="modalExportRow">
       <button id="modalSend" class="modal-export-btn" type="button" hidden
         title="Put this stat line on the OBS lower third">▶ Send to OBS</button>
@@ -394,7 +412,7 @@
       <button id="modalDownload" class="modal-export-btn" type="button" hidden
         title="Download this stat line as a PNG lower third">⬇ Save PNG</button>
       <button id="modalSocialDownload" class="modal-export-btn" type="button" hidden
-        title="Download a vertical jersey-style card for Instagram/X">📱 Social PNG</button>
+        title="Download a vertical stat card for Instagram/X">📱 Social PNG</button>
     </div>
     <div id="modalDlNote" class="modal-dlnote"></div>
   </div>
@@ -413,7 +431,7 @@
       <div class="lt-hitline" id="ltHitline"></div>
       <div class="lt-cells" id="ltCells"></div>
     </div>
-    <div class="lt-watermark" id="ltWatermark">Talkin' Giants</div>
+    <div class="lt-watermark" id="ltWatermark">JM Football</div>
   </div>
 </div>
 
@@ -424,9 +442,8 @@
 // Config
 // =====================================================================================
 
-// The show's wordmark, baked into the bar and the PNG. Colours live in :root above.
-const WORDMARK = "TALKIN' GIANTS";
-const HOME_TEAM_ID = 19;              // New York Giants (ESPN team id)
+// The umbrella brand's wordmark, baked into the bar and the PNG. Colours live in :root above.
+const WORDMARK = "JM FOOTBALL";
 
 // ESPN's public endpoints — no API key. Everything we actually fetch (rosters, game logs, career
 // stats) sends Access-Control-Allow-Origin, so this works straight off GitHub Pages with no proxy.
@@ -447,10 +464,10 @@ const params = new URLSearchParams(location.search);
 const isDisplayMode = params.get('display') === '1';
 if (isDisplayMode) document.body.classList.add('display-mode');
 
-const LT_KEY = 'tg-lower-third-onair';
-const TOPIC_KEY = 'tg-snapshot-topic';
+const LT_KEY = 'jmf-lower-third-onair';
+const TOPIC_KEY = 'jmf-snapshot-topic';
 let TOPIC = params.get('topic') || '';
-const ltChannel = 'BroadcastChannel' in window ? new BroadcastChannel('tg-lower-third') : null;
+const ltChannel = 'BroadcastChannel' in window ? new BroadcastChannel('jmf-lower-third') : null;
 
 const logoURL = abbr => `https://a.espncdn.com/i/teamlogos/nfl/500/${String(abbr).toLowerCase()}.png`;
 const headshotURL = pid => `https://a.espncdn.com/i/headshots/nfl/players/full/${pid}.png`;
@@ -607,7 +624,7 @@ function renderDirectory(divFilter) {
     out.appendChild(el('div', 'divhead', dv.short));
     const grid = el('div', 'team-grid');
     dv.teams.forEach(t => {
-      const card = el('button', 'team-card' + (+t.id === HOME_TEAM_ID ? ' home' : ''));
+      const card = el('button', 'team-card');
       card.type = 'button';
       card.innerHTML = `<img src="${logoURL(t.abbr)}" alt="" onerror="this.remove()"><span class="tname">${t.name}</span>`;
       card.onclick = () => { $('team').value = t.id; $('division').value = dv.short; guard(loadRoster)(t.id); };
@@ -753,9 +770,8 @@ function addTable(title, table, note) {
 // The baseball tool gets a whole-league player index in one call. ESPN has no equivalent: its
 // league-wide athlete list is 20k entries deep, paged 25 at a time, and carries no team or
 // position — useless for a search table with Pos and Team columns. So the index is built from
-// the 32 team rosters instead, in the background, a few at a time: the Giants land first so the
-// page is usable immediately, and search works against whatever has arrived so far rather than
-// blocking on all 32.
+// the 32 team rosters instead, in the background, a few at a time, and search works against
+// whatever has arrived so far rather than blocking on all 32.
 
 let allPlayers = [];             // [{id,name,pos,number,teamId,teamName,teamAbbr}]
 let indexedTeams = new Set();
@@ -764,7 +780,7 @@ let indexing = false;
 async function buildPlayerIndex() {
   if (indexing) return;
   indexing = true;
-  const ids = [String(HOME_TEAM_ID), ...[...teamsById.keys()].filter(id => +id !== HOME_TEAM_ID)];
+  const ids = [...teamsById.keys()];
   const CONCURRENCY = 6;         // enough to finish quickly, gentle enough not to look like a scrape
   let cursor = 0;
 
@@ -1392,6 +1408,7 @@ let modalMap = null, modalNames = null, modalLabel = '', modalSub = '';
 let modalOpp = '';
 let modalPreGame = '';           // '' = every preseason game added up; otherwise an index into modalPreseason.games
 let socialMode = 'stats';        // what the social card's bottom badges show: 'stats' or 'fantasy'
+let socialCustomPhoto = null;    // a locally-loaded Image to use instead of the ESPN headshot, or null
 // Which stats are on the bar, in bar order. Seeded from the position defaults each time a new
 // player is opened, then whatever the producer has clicked. Kept across timeframe changes for the
 // same player — flipping to LAST 3 shouldn't undo a selection you just made.
@@ -1403,7 +1420,7 @@ async function openPlayerModal(pid) {
   if (!row) return;
   const samePlayer = modalPid === String(pid);
   modalPid = String(pid); modalRow = row; modalTf = 'season'; modalOpp = ''; modalPreGame = ''; socialMode = 'stats';
-  if (!samePlayer) modalPicks = [];      // new player: back to that position's defaults
+  if (!samePlayer) { modalPicks = []; clearSocialPhoto(); }   // new player: back to that position's defaults
   modalLog = modalCareer = modalCareerGames = modalPreseason = null;
   [...$('socialToggle').children].forEach(c => c.classList.toggle('on', c.dataset.mode === socialMode));
   $('modalDlNote').textContent = '';
@@ -1978,6 +1995,27 @@ async function teamColorRGB(abbr) {
   return rgb;
 }
 
+// A dropped-in licensed photo for the Social card (see renderSocialCardCanvas), replacing the ESPN
+// headshot for this player only — cleared whenever a different player opens.
+function setSocialPhoto(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const img = new Image();
+  img.onload = () => {
+    socialCustomPhoto = img;
+    $('photoDropText').textContent = `Using: ${file.name}`;
+    $('photoDrop').classList.add('has-photo');
+    $('photoDropClear').hidden = false;
+  };
+  img.src = URL.createObjectURL(file);
+}
+function clearSocialPhoto() {
+  socialCustomPhoto = null;
+  $('photoDropText').textContent = '＋ Drop a photo for the Social card (optional — uses the ESPN headshot otherwise)';
+  $('photoDrop').classList.remove('has-photo');
+  $('photoDropClear').hidden = true;
+  $('photoInput').value = '';
+}
+
 // Stats mode: the same picks (and order) as the lower third — first five go big in the stack,
 // anything beyond that (up to MAX_PICKS) drops to the small line at the very bottom, the same way
 // the reference keeps ERA and pitch count off to the side. Fantasy mode: the three scoring variants.
@@ -2051,7 +2089,11 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   roundRectPath(ctx, PX - 9, PY - 9, PW + 18, PH + 18, PR + 6);
   ctx.fillStyle = '#f4f4f2'; ctx.fill();
   ctx.restore();
-  const headImg = await loadSafeImage(headshotURL(row.id));
+  // a dropped-in licensed photo wins over the ESPN headshot — see the drop zone under the timeframe
+  // pills. Action photos tend to frame the subject more centrally than a studio headshot does, so
+  // it gets a centered crop instead of the headshot's face-near-top bias.
+  const headImg = socialCustomPhoto || await loadSafeImage(headshotURL(row.id));
+  const vBias = socialCustomPhoto ? 0.5 : 0.28;
   ctx.save();
   roundRectPath(ctx, PX, PY, PW, PH, PR);
   ctx.clip();
@@ -2059,7 +2101,7 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   if (headImg) {
     const scale = Math.max(PW / headImg.width, PH / headImg.height);
     const iw = headImg.width * scale, ih = headImg.height * scale;
-    ctx.drawImage(headImg, PX + (PW - iw) / 2, PY + (PH - ih) * 0.28, iw, ih);
+    ctx.drawImage(headImg, PX + (PW - iw) / 2, PY + (PH - ih) * vBias, iw, ih);
   }
   ctx.restore();
 
@@ -2289,11 +2331,6 @@ $('goHome').onclick = () => {
   currentTeamId = null;
   renderDirectory();
 };
-$('goGiants').onclick = () => {
-  $('find').value = '';
-  $('team').value = String(HOME_TEAM_ID);
-  guard(loadRoster)(HOME_TEAM_ID);
-};
 $('team').onchange = () => {
   const id = $('team').value;
   $('find').value = '';
@@ -2343,6 +2380,17 @@ $('socialToggle').onclick = e => {
   const b = e.target.closest('button[data-mode]'); if (!b) return;
   socialMode = b.dataset.mode;
   [...$('socialToggle').children].forEach(c => c.classList.toggle('on', c === b));
+};
+$('photoDrop').onclick = e => { if (e.target.id !== 'photoDropClear') $('photoInput').click(); };
+$('photoInput').onchange = e => setSocialPhoto(e.target.files[0]);
+$('photoDropClear').onclick = e => { e.stopPropagation(); clearSocialPhoto(); };
+$('photoDrop').ondragover = e => { e.preventDefault(); $('photoDrop').classList.add('drag'); };
+$('photoDrop').ondragleave = () => $('photoDrop').classList.remove('drag');
+$('photoDrop').ondrop = e => {
+  e.preventDefault();
+  $('photoDrop').classList.remove('drag');
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (file) setSocialPhoto(file);
 };
 $('modalBackdrop').onclick = e => { if (e.target.id === 'modalBackdrop') closeModal(); };
 document.onkeydown = e => { if (e.key === 'Escape' && !$('modalBackdrop').hidden) closeModal(); };
@@ -2444,7 +2492,7 @@ if (isDisplayMode) {
   // guessable one is someone else's write access to your lower third.
   let saved = '';
   try { saved = localStorage.getItem(TOPIC_KEY) || ''; } catch {}
-  $('topicInput').value = saved || `tg-snapshot-${Math.random().toString(36).slice(2, 8)}`;
+  $('topicInput').value = saved || `jmf-snapshot-${Math.random().toString(36).slice(2, 8)}`;
   if (saved) { TOPIC = saved; setConn(true); }
   else setConn(false);
   updateConnHint();
@@ -2452,11 +2500,8 @@ if (isDisplayMode) {
   guard(async () => {
     buildTeams();               // static table — no request, so the directory is ready immediately
     say('');
-    // Open on the Giants — it's their show. The rest of the league is a click away.
-    $('team').value = String(HOME_TEAM_ID);
-    const nyg = divisions.find(dv => dv.short === 'NFC East');
-    if (nyg) $('division').value = 'NFC East';
-    await loadRoster(HOME_TEAM_ID);
+    // No home team for a multi-show umbrella tool — opens on the full directory, any team a click away.
+    renderDirectory();
     buildPlayerIndex();          // fills the global search index in the background
   })();
 }
