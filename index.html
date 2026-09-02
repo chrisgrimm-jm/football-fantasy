@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Stat Snapshot — JM Football</title>
+<title>Football Fantasy — JM Football</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&family=Archivo+Black&display=swap" rel="stylesheet">
@@ -334,7 +334,7 @@
   <div class="datanote" id="datanote">Data <b>Live via ESPN</b></div>
   <div class="eyebrow">JM Football</div>
   <div class="titlerow">
-    <h1>STAT SNAPSHOT<span>.</span></h1>
+    <h1>FOOTBALL FANTASY<span>.</span></h1>
     <button id="goHome" class="home-btn" type="button" title="Back to all 32 teams">⌂ All Teams</button>
     <div class="teambadge" id="teambadge"></div>
   </div>
@@ -393,10 +393,6 @@
       <select id="preGameSelect"></select>
     </div>
     <div id="modalBody" class="modal-body"></div>
-    <div class="tf-pills" id="socialToggle" title="What the social card's bottom badges show">
-      <button type="button" class="tf-pill on" data-mode="stats">CARD: STATS</button>
-      <button type="button" class="tf-pill" data-mode="fantasy">CARD: FANTASY</button>
-    </div>
     <div class="photo-drop" id="photoDrop"
       title="Drag a licensed photo here, or click, to use on the Social PNG instead of the ESPN headshot">
       <span id="photoDropText">＋ Drop a photo for the Social card (optional — uses the ESPN headshot otherwise)</span>
@@ -1407,7 +1403,6 @@ let modalLog = null, modalCareer = null, modalCareerGames = null, modalPreseason
 let modalMap = null, modalNames = null, modalLabel = '', modalSub = '';
 let modalOpp = '';
 let modalPreGame = '';           // '' = every preseason game added up; otherwise an index into modalPreseason.games
-let socialMode = 'stats';        // what the social card's bottom badges show: 'stats' or 'fantasy'
 let socialCustomPhoto = null;    // a locally-loaded Image to use instead of the ESPN headshot, or null
 // Which stats are on the bar, in bar order. Seeded from the position defaults each time a new
 // player is opened, then whatever the producer has clicked. Kept across timeframe changes for the
@@ -1419,10 +1414,9 @@ async function openPlayerModal(pid) {
   const row = currentIndex.get(String(pid));
   if (!row) return;
   const samePlayer = modalPid === String(pid);
-  modalPid = String(pid); modalRow = row; modalTf = 'season'; modalOpp = ''; modalPreGame = ''; socialMode = 'stats';
+  modalPid = String(pid); modalRow = row; modalTf = 'season'; modalOpp = ''; modalPreGame = '';
   if (!samePlayer) { modalPicks = []; clearSocialPhoto(); }   // new player: back to that position's defaults
   modalLog = modalCareer = modalCareerGames = modalPreseason = null;
-  [...$('socialToggle').children].forEach(c => c.classList.toggle('on', c.dataset.mode === socialMode));
   $('modalDlNote').textContent = '';
   $('modalHeadshot').src = headshotURL(pid);
   $('modalHeadshot').onerror = function () { this.style.visibility = 'hidden'; };
@@ -2016,42 +2010,16 @@ function clearSocialPhoto() {
   $('photoInput').value = '';
 }
 
-// Stats mode: the same picks (and order) as the lower third — first five go big in the stack,
-// anything beyond that (up to MAX_PICKS) drops to the small line at the very bottom, the same way
-// the reference keeps ERA and pitch count off to the side. Fantasy mode: the three scoring variants.
+// Same picks (and order) as the lower third — including fantasy points, since PPR is just another
+// entry in that same grid (see CELL_SPEC) — capped to what the card's layout has room for: the
+// first five go big in the stack, a 6th/7th (if picked) drop to the small line at the very bottom.
 const SOCIAL_MAX_PRIMARY = 5, SOCIAL_MAX_SECONDARY = 2;
-function socialCells(mode) {
-  if (mode === 'fantasy') {
-    if (!modalMap || !FANTASY_GROUPS.has(modalGroup)) return [];
-    return FANTASY_STAT_NAMES.filter(k => hasVal(modalMap[k])).map(k => [NICE_LABEL[k], modalMap[k]]);
-  }
+function socialCells() {
   const data = graphicData();
   return data ? data.cells.slice(0, SOCIAL_MAX_PRIMARY + SOCIAL_MAX_SECONDARY) : [];
 }
 
 const SOCIAL_W = 1080, SOCIAL_H = 1350;
-
-// A low-poly facet field over the navy ground — each triangle a small random lightness step off
-// the base color, so it reads as cut glass rather than a flat fill. No two exports are identical,
-// which is fine: this is a one-off download, not something that has to reproduce on request.
-function paintFacets(ctx, w, h, base) {
-  const [br, bg, bb] = base;
-  const cell = 150;
-  for (let y = -cell; y < h + cell; y += cell) {
-    for (let x = -cell; x < w + cell; x += cell) {
-      const jx = () => x + Math.random() * cell, jy = () => y + Math.random() * cell;
-      const pts = [[jx(), jy()], [jx(), jy()], [jx(), jy()], [jx(), jy()]];
-      // two triangles per cell, sharing a random diagonal
-      [[pts[0], pts[1], pts[2]], [pts[0], pts[2], pts[3]]].forEach(tri => {
-        const shade = (Math.random() - 0.5) * 34;
-        ctx.fillStyle = `rgb(${Math.max(0, br + shade) | 0},${Math.max(0, bg + shade) | 0},${Math.max(0, bb + shade) | 0})`;
-        ctx.beginPath();
-        ctx.moveTo(tri[0][0], tri[0][1]); ctx.lineTo(tri[1][0], tri[1][1]); ctx.lineTo(tri[2][0], tri[2][1]);
-        ctx.closePath(); ctx.fill();
-      });
-    }
-  }
-}
 
 async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   await Promise.all([
@@ -2065,15 +2033,8 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   canvas.width = SOCIAL_W; canvas.height = SOCIAL_H;
   const ctx = canvas.getContext('2d');
 
-  // ground: fixed navy so the template reads the same for every team, faceted for texture, the
-  // team's own color folded in at low opacity so it still shifts a little show to show
-  const NAVY = [8, 15, 26];
-  ctx.fillStyle = `rgb(${NAVY[0]},${NAVY[1]},${NAVY[2]})`; ctx.fillRect(0, 0, SOCIAL_W, SOCIAL_H);
-  const facetBase = NAVY.map((c, i) => Math.round(c * 0.7 + teamRGB[i] * 0.3));
-  paintFacets(ctx, SOCIAL_W, SOCIAL_H, facetBase);
-  const vign = ctx.createRadialGradient(SOCIAL_W * .5, SOCIAL_H * .4, 200, SOCIAL_W * .5, SOCIAL_H * .5, SOCIAL_W);
-  vign.addColorStop(0, 'rgba(8,15,26,0)'); vign.addColorStop(1, 'rgba(4,8,14,.55)');
-  ctx.fillStyle = vign; ctx.fillRect(0, 0, SOCIAL_W, SOCIAL_H);
+  // ground: a flat fill of the team's own color, sampled straight from its logo
+  ctx.fillStyle = `rgb(${teamRGB[0]},${teamRGB[1]},${teamRGB[2]})`; ctx.fillRect(0, 0, SOCIAL_W, SOCIAL_H);
 
   // team mark, bleeding off the bottom-left corner, behind the photo frame
   if (logoImg) {
@@ -2185,21 +2146,20 @@ function roundRectPath(ctx, x, y, w, h, r) {
 async function downloadSocialCard() {
   const note = $('modalDlNote'), btn = $('modalSocialDownload');
   if (!modalRow) return;
-  const cells = socialCells(socialMode);
+  const cells = socialCells();
   if (!cells.length) {
-    if (note) note.textContent = socialMode === 'fantasy'
-      ? 'No fantasy points for this position.' : 'Nothing to put on the card for this timeframe.';
+    if (note) note.textContent = 'Nothing to put on the card for this timeframe.';
     return;
   }
   btn.disabled = true;
   if (note) note.textContent = 'Building social card…';
   try {
-    const canvas = await renderSocialCardCanvas(modalRow, cells, socialMode === 'fantasy' ? 'Fantasy Points' : modalLabel);
+    const canvas = await renderSocialCardCanvas(modalRow, cells, modalLabel);
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
     if (!blob) throw new Error('Canvas export failed');
     const a = el('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${modalRow.name.replace(/[^\w\d]+/g, '-')}-social-${socialMode}.png`;
+    a.download = `${modalRow.name.replace(/[^\w\d]+/g, '-')}-social.png`;
     a.click(); URL.revokeObjectURL(a.href);
     if (note) note.textContent = 'Downloaded ✓';
   } catch (e) {
@@ -2376,11 +2336,6 @@ $('modalSend').onclick = toggleObs;
 $('modalUpdate').onclick = () => pushGraphic('Updated ✓');
 $('modalDownload').onclick = downloadGraphic;
 $('modalSocialDownload').onclick = downloadSocialCard;
-$('socialToggle').onclick = e => {
-  const b = e.target.closest('button[data-mode]'); if (!b) return;
-  socialMode = b.dataset.mode;
-  [...$('socialToggle').children].forEach(c => c.classList.toggle('on', c === b));
-};
 $('photoDrop').onclick = e => { if (e.target.id !== 'photoDropClear') $('photoInput').click(); };
 $('photoInput').onchange = e => setSocialPhoto(e.target.files[0]);
 $('photoDropClear').onclick = e => { e.stopPropagation(); clearSocialPhoto(); };
