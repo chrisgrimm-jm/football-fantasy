@@ -196,6 +196,12 @@
   .pf-hint{font-family:var(--font-mono);font-size:9px;letter-spacing:.06em;color:var(--text3);
     text-transform:uppercase}
 
+  /* ---- live Social card preview — redraws on every stat/photo change, see refreshSocialPreview ---- */
+  .social-preview{display:flex;flex-direction:column;align-items:center;gap:8px;margin:14px 0 0}
+  .sp-label{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--label);opacity:.9}
+  #socialPreviewCanvas{border-radius:6px;box-shadow:0 10px 24px rgba(0,0,0,.35)}
+
   .modal-export-row{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 4px}
   .modal-export-btn{background:var(--accent);color:var(--white);border:1px solid var(--accent);
     border-radius:var(--radius);padding:11px 18px;font-family:var(--font-display);font-weight:400;
@@ -420,6 +426,10 @@
         <button type="button" id="photoResetBtn" title="Reset zoom and position">Reset</button>
         <span class="pf-hint">Drag the photo to reposition</span>
       </div>
+    </div>
+    <div class="social-preview" id="socialPreviewBox" hidden>
+      <span class="sp-label">Social card preview</span>
+      <canvas id="socialPreviewCanvas" width="216" height="270"></canvas>
     </div>
     <div class="modal-export-row" id="modalExportRow">
       <button id="modalSend" class="modal-export-btn" type="button" hidden
@@ -1689,6 +1699,7 @@ async function loadModalStats() {
     $('modalBody').innerHTML = `<div class="modal-empty">${why}</div>`;
     modalMap = null;
     updateSendBtn();
+    scheduleSocialPreview();
     return;
   }
 
@@ -1743,6 +1754,7 @@ function paintStatGrid() {
       : 'Nothing selected — click a stat below';
   }
   updateSendBtn();
+  scheduleSocialPreview();
 }
 
 function toggleStat(name) {
@@ -1874,6 +1886,15 @@ function loadSafeImage(src) {
     img.onerror = () => resolve(null);
     img.src = src;
   });
+}
+
+// Same as loadSafeImage, but remembered — the live Social card preview re-renders on every stat
+// toggle and every drag of the photo, and a team's logo or the JMF badge never changes mid-session,
+// so there's no reason to refetch either one on each of those redraws.
+const imageCache = new Map();
+function loadCachedImage(src) {
+  if (!imageCache.has(src)) imageCache.set(src, loadSafeImage(src));
+  return imageCache.get(src);
 }
 
 // Mirrors the on-air .lt-bar layout on a canvas, reading the same brand colors out of :root, so the
@@ -2055,6 +2076,30 @@ function repaintPhotoPreview() {
   ctx.translate(-SOCIAL_PHOTO.x, -SOCIAL_PHOTO.y);
   drawSocialPhoto(ctx, socialActivePhoto, SOCIAL_PHOTO, socialPhotoZoom);
   ctx.restore();
+  scheduleSocialPreview();   // every caller of this wants the full card kept in sync too
+}
+
+// Full-card live preview — debounced, since a photo drag fires this on every pointermove and a
+// full render does async work (fonts, the team's logo, the JMF badge). Team/JMF logos are cached
+// (loadCachedImage) so only the first render of a session ever actually fetches them; everything
+// after that is just canvas drawing, which is cheap enough to redo on every keystroke.
+let socialPreviewTimer = null, socialPreviewSeq = 0;
+function scheduleSocialPreview() {
+  clearTimeout(socialPreviewTimer);
+  socialPreviewTimer = setTimeout(refreshSocialPreview, 120);
+}
+async function refreshSocialPreview() {
+  const box = $('socialPreviewBox'), canvas = $('socialPreviewCanvas');
+  if (!modalRow) { box.hidden = true; return; }
+  const cells = socialCells();
+  if (!cells.length) { box.hidden = true; return; }
+  box.hidden = false;
+  const seq = ++socialPreviewSeq;
+  const full = await renderSocialCardCanvas(modalRow, cells, modalLabel);
+  if (seq !== socialPreviewSeq) return;   // a newer preview started while this one was building
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(full, 0, 0, canvas.width, canvas.height);
 }
 
 // Same picks (and order) as the lower third — including fantasy points, since PPR is just another
@@ -2105,8 +2150,8 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
     document.fonts.load('500 26px "DM Mono"'), document.fonts.load('700 26px "DM Mono"'),
   ]);
   const teamRGB = (await teamColorRGB(row.teamAbbr)) || [26, 58, 94];
-  const logoImg = await loadSafeImage(logoURL(row.teamAbbr));
-  const jmfLogoImg = await loadSafeImage(JMF_LOGO_URL);
+  const logoImg = await loadCachedImage(logoURL(row.teamAbbr));
+  const jmfLogoImg = await loadCachedImage(JMF_LOGO_URL);
 
   const canvas = document.createElement('canvas');
   canvas.width = SOCIAL_W; canvas.height = SOCIAL_H;
