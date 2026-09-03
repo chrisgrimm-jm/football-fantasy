@@ -2166,12 +2166,12 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   const boxCenterX = PX + PW / 2;
   let stackY = PY + PH + 20;
   if (logoImg) {
-    const ls = 260;
+    const ls = 340;
     ctx.drawImage(logoImg, boxCenterX - ls / 2, stackY, ls, ls);
-    stackY += ls + 20;
+    stackY += ls + 24;
   }
   if (jmfLogoImg) {
-    const js = 110;
+    const js = 130;
     ctx.drawImage(jmfLogoImg, boxCenterX - js / 2, stackY, js, js);
   }
 
