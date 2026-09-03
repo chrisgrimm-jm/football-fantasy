@@ -2135,7 +2135,7 @@ const SOCIAL_FULL_LABEL = {
 // Same picks (and order) as the lower third — including fantasy points, since PPR is just another
 // entry in that same grid (see CELL_SPEC) — capped to what the card's layout has room for: the
 // first five go big in the stack, a 6th/7th (if picked) drop to the small line at the very bottom.
-const SOCIAL_MAX_PRIMARY = 5, SOCIAL_MAX_SECONDARY = 2;
+const SOCIAL_MAX_PRIMARY = 4, SOCIAL_MAX_SECONDARY = 2;
 function socialCells() {
   if (!modalMap) return [];
   return (modalEntries || [])
@@ -2209,19 +2209,12 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   // ground: the team's own color, sampled straight from its logo, with a faint yard-line grid
   paintFieldGrid(ctx, SOCIAL_W, SOCIAL_H, teamRGB);
 
-  // team mark and the JM Football badge, both squared up and centered under the photo box —
-  // stacked, not bled off an edge, so the whole left column reads as one aligned block
+  // team mark, squared up and centered under the photo box
   const { x: PX, y: PY, w: PW, h: PH, r: PR } = SOCIAL_PHOTO;
   const boxCenterX = PX + PW / 2;
-  let stackY = PY + PH + 20;
   if (logoImg) {
     const ls = 340;
-    ctx.drawImage(logoImg, boxCenterX - ls / 2, stackY, ls, ls);
-    stackY += ls + 24;
-  }
-  if (jmfLogoImg) {
-    const js = 180;
-    ctx.drawImage(jmfLogoImg, boxCenterX - js / 2, stackY, js, js);
+    ctx.drawImage(logoImg, boxCenterX - ls / 2, PY + PH + 20, ls, ls);
   }
 
   // headshot, cover-fit into a rounded portrait frame with a white border like a printed photo —
@@ -2241,10 +2234,12 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   }
   ctx.restore();
 
-  // wordmark, top-left — same small brand tag every export in this app carries
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = '700 15px "DM Mono"';
-  ctx.fillText(WORDMARK, PX, 46);
+  // JMF badge, top-left — the brand tag every export in this app carries, moved up from the
+  // photo-box stack so it reads as the card's own corner mark instead of a second team logo
+  if (jmfLogoImg) {
+    const js = 56;
+    ctx.drawImage(jmfLogoImg, PX, 20, js, js);
+  }
 
   // name: first name small and silver, last name huge with a brushed-steel gradient — right
   // column is centered so it holds up whether the name is four letters or a hyphenated dozen
