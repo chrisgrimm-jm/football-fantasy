@@ -171,31 +171,6 @@
   .oppRow[hidden]{display:none}
   .oppRow select{font-family:var(--font-mono);font-size:12px;padding:6px 9px}
 
-  /* ---- Social PNG: optional Getty/licensed photo, dropped in over the ESPN headshot ---- */
-  .photo-drop{display:flex;align-items:center;justify-content:space-between;gap:10px;
-    border:1px dashed var(--border2);border-radius:var(--radius);padding:10px 14px;margin:14px 0 0;
-    cursor:pointer;transition:all .15s}
-  .photo-drop:hover{border-color:rgba(143,189,240,.5);background:rgba(143,189,240,.05)}
-  .photo-drop.drag{border-color:var(--accent);background:var(--accent-dim);border-style:solid}
-  .photo-drop.has-photo{border-style:solid;border-color:rgba(95,221,170,.5)}
-  .photo-drop span{font-family:var(--font-mono);font-size:11px;letter-spacing:.05em;color:var(--text2)}
-  .photo-drop.has-photo span{color:var(--green)}
-  .photo-drop-clear{background:none;border:1px solid var(--border);color:var(--text2);border-radius:50%;
-    width:22px;height:22px;flex:none;padding:0;font-size:11px;line-height:1;cursor:pointer}
-  .photo-drop-clear:hover{border-color:var(--red);color:var(--red)}
-
-  /* ---- Social PNG: frame/zoom the active photo before exporting ---- */
-  .photo-frame-editor{display:flex;gap:14px;align-items:flex-start;margin:10px 0 0;
-    border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;background:var(--surface)}
-  #photoPreviewCanvas{flex:none;border-radius:4px;border:1px solid var(--border2);cursor:grab;
-    touch-action:none;background:var(--surface3)}
-  #photoPreviewCanvas:active{cursor:grabbing}
-  .pf-controls{display:flex;flex-direction:column;gap:8px;flex:1;min-width:0}
-  .pf-controls label{margin:0}
-  .pf-controls input[type=range]{width:100%;accent-color:var(--accent)}
-  .pf-hint{font-family:var(--font-mono);font-size:9px;letter-spacing:.06em;color:var(--text3);
-    text-transform:uppercase}
-
   /* ---- live Social card preview — redraws on every stat/photo change, see refreshSocialPreview ---- */
   .social-preview{display:flex;flex-direction:column;align-items:center;gap:8px;margin:14px 0 0}
   .sp-label{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
@@ -411,22 +386,6 @@
       <select id="preGameSelect"></select>
     </div>
     <div id="modalBody" class="modal-body"></div>
-    <div class="photo-drop" id="photoDrop"
-      title="Drag a licensed photo here, or click, to use on the Social PNG instead of the ESPN headshot">
-      <span id="photoDropText">＋ Drop a photo for the Social card (optional — uses the ESPN headshot otherwise)</span>
-      <button type="button" id="photoDropClear" class="photo-drop-clear" hidden
-        title="Use the ESPN headshot instead">✕</button>
-      <input type="file" id="photoInput" accept="image/*" hidden>
-    </div>
-    <div class="photo-frame-editor" id="photoFrameEditor">
-      <canvas id="photoPreviewCanvas" width="162" height="212" title="Drag to reposition"></canvas>
-      <div class="pf-controls">
-        <label for="photoZoomSlider">Zoom</label>
-        <input type="range" id="photoZoomSlider" min="100" max="250" value="100" step="5">
-        <button type="button" id="photoResetBtn" title="Reset zoom and position">Reset</button>
-        <span class="pf-hint">Drag the photo to reposition</span>
-      </div>
-    </div>
     <div class="social-preview" id="socialPreviewBox" hidden>
       <span class="sp-label">Social card preview</span>
       <canvas id="socialPreviewCanvas" width="216" height="270"></canvas>
@@ -1435,7 +1394,6 @@ let modalLog = null, modalCareer = null, modalCareerGames = null, modalPreseason
 let modalMap = null, modalNames = null, modalLabel = '', modalSub = '';
 let modalOpp = '';
 let modalPreGame = '';           // '' = every preseason game added up; otherwise an index into modalPreseason.games
-let socialCustomPhoto = null;    // a locally-loaded Image to use instead of the ESPN headshot, or null
 // Which stats are on the bar, in bar order. Seeded from the position defaults each time a new
 // player is opened, then whatever the producer has clicked. Kept across timeframe changes for the
 // same player — flipping to LAST 3 shouldn't undo a selection you just made.
@@ -1447,7 +1405,7 @@ async function openPlayerModal(pid) {
   if (!row) return;
   const samePlayer = modalPid === String(pid);
   modalPid = String(pid); modalRow = row; modalTf = 'season'; modalOpp = ''; modalPreGame = '';
-  if (!samePlayer) { modalPicks = []; clearSocialPhoto(); }   // new player: back to that position's defaults
+  if (!samePlayer) modalPicks = [];      // new player: back to that position's defaults
   modalLog = modalCareer = modalCareerGames = modalPreseason = null;
   $('modalDlNote').textContent = '';
   $('modalHeadshot').src = headshotURL(pid);
@@ -2032,54 +1990,8 @@ async function teamColorRGB(abbr) {
   return rgb;
 }
 
-// A dropped-in licensed photo for the Social card (see renderSocialCardCanvas), replacing the ESPN
-// headshot for this player only — cleared whenever a different player opens.
-function setSocialPhoto(file) {
-  if (!file || !file.type.startsWith('image/')) return;
-  const img = new Image();
-  img.onload = () => {
-    socialCustomPhoto = img;
-    $('photoDropText').textContent = `Using: ${file.name}`;
-    $('photoDrop').classList.add('has-photo');
-    $('photoDropClear').hidden = false;
-    resetSocialPhotoFraming();
-    socialActivePhoto = img;
-    repaintPhotoPreview();
-  };
-  img.src = URL.createObjectURL(file);
-}
-function clearSocialPhoto() {
-  socialCustomPhoto = null;
-  $('photoDropText').textContent = '＋ Drop a photo for the Social card (optional — uses the ESPN headshot otherwise)';
-  $('photoDrop').classList.remove('has-photo');
-  $('photoDropClear').hidden = true;
-  $('photoInput').value = '';
-  resetSocialPhotoFraming();
-  if (modalRow) loadActiveSocialPhoto(modalRow).then(repaintPhotoPreview);
-}
-function resetSocialPhotoFraming() {
-  socialPhotoZoom = 1; socialPhotoOffsetX = 0; socialPhotoOffsetY = 0;
-  const slider = $('photoZoomSlider'); if (slider) slider.value = 100;
-}
-
-// Redraws the small draggable preview from the same frame math the full export uses, so what the
-// producer sees while adjusting zoom/position is exactly what ends up in the PNG.
-function repaintPhotoPreview() {
-  const canvas = $('photoPreviewCanvas');
-  if (!canvas || !socialActivePhoto) return;
-  clampSocialPhotoOffset(socialActivePhoto, SOCIAL_PHOTO, socialPhotoZoom);
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.save();
-  const s = canvas.width / SOCIAL_PHOTO.w;
-  ctx.scale(s, s);
-  ctx.translate(-SOCIAL_PHOTO.x, -SOCIAL_PHOTO.y);
-  drawSocialPhoto(ctx, socialActivePhoto, SOCIAL_PHOTO, socialPhotoZoom);
-  ctx.restore();
-  scheduleSocialPreview();   // every caller of this wants the full card kept in sync too
-}
-
-// Full-card live preview — debounced, since a photo drag fires this on every pointermove and a
+// Full-card live preview — debounced so rapid stat toggling doesn't queue up redundant renders. Team
+// and JMF logos are cached (loadCachedImage) so they're only ever fetched once per session.
 // full render does async work (fonts, the team's logo, the JMF badge). Team/JMF logos are cached
 // (loadCachedImage) so only the first render of a session ever actually fetches them; everything
 // after that is just canvas drawing, which is cheap enough to redo on every keystroke.
@@ -2145,37 +2057,6 @@ function socialCells() {
 }
 
 const SOCIAL_W = 1080, SOCIAL_H = 1350;
-const SOCIAL_PHOTO = { x: 60, y: 108, w: 486, h: 636, r: 26 };
-
-// Producer-adjustable framing for whichever photo is active (custom or ESPN headshot) — a zoom
-// multiple over the minimum cover-fit scale, plus a pixel offset in the main canvas's own
-// coordinate space, so the preview and the final export can share the exact same math.
-let socialPhotoZoom = 1;
-let socialPhotoOffsetX = 0, socialPhotoOffsetY = 0;
-let socialActivePhoto = null;   // the resolved Image currently being framed, or null until loaded
-
-function clampSocialPhotoOffset(img, frame, zoom) {
-  const baseScale = Math.max(frame.w / img.width, frame.h / img.height);
-  const scale = baseScale * zoom;
-  const iw = img.width * scale, ih = img.height * scale;
-  const maxOx = Math.max(0, (iw - frame.w) / 2), maxOy = Math.max(0, (ih - frame.h) / 2);
-  socialPhotoOffsetX = Math.max(-maxOx, Math.min(maxOx, socialPhotoOffsetX));
-  socialPhotoOffsetY = Math.max(-maxOy, Math.min(maxOy, socialPhotoOffsetY));
-}
-function drawSocialPhoto(ctx, img, frame, zoom) {
-  const baseScale = Math.max(frame.w / img.width, frame.h / img.height);
-  const scale = baseScale * zoom;
-  const iw = img.width * scale, ih = img.height * scale;
-  ctx.drawImage(img, frame.x + (frame.w - iw) / 2 + socialPhotoOffsetX,
-    frame.y + (frame.h - ih) / 2 + socialPhotoOffsetY, iw, ih);
-}
-
-// Resolves whichever photo is currently in play (a dropped-in licensed photo wins over the ESPN
-// headshot) and caches it so the live preview and the final render never refetch mid-adjustment.
-async function loadActiveSocialPhoto(row) {
-  socialActivePhoto = socialCustomPhoto || await loadSafeImage(headshotURL(row.id));
-  return socialActivePhoto;
-}
 
 // A faint yard-line grid over the team's own color — the most explicitly "football" of the
 // background treatments tried, and the one that stuck.
@@ -2195,7 +2076,7 @@ function paintFieldGrid(ctx, w, h, teamRGB) {
 
 async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   await Promise.all([
-    document.fonts.load('700 130px "Archivo Black"'), document.fonts.load('700 48px "Archivo Black"'),
+    document.fonts.load('700 170px "Archivo Black"'), document.fonts.load('700 48px "Archivo Black"'),
     document.fonts.load('500 26px "DM Mono"'), document.fonts.load('700 26px "DM Mono"'),
   ]);
   const teamRGB = (await teamColorRGB(row.teamAbbr)) || [26, 58, 94];
@@ -2209,41 +2090,15 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   // ground: the team's own color, sampled straight from its logo, with a faint yard-line grid
   paintFieldGrid(ctx, SOCIAL_W, SOCIAL_H, teamRGB);
 
-  // team mark, squared up and centered under the photo box
-  const { x: PX, y: PY, w: PW, h: PH, r: PR } = SOCIAL_PHOTO;
-  const boxCenterX = PX + PW / 2;
-  if (logoImg) {
-    const ls = 340;
-    ctx.drawImage(logoImg, boxCenterX - ls / 2, PY + PH + 20, ls, ls);
-  }
-
-  // headshot, cover-fit into a rounded portrait frame with a white border like a printed photo —
-  // zoom/position are whatever the producer set in the framing preview under the timeframe pills
-  ctx.save();
-  roundRectPath(ctx, PX - 9, PY - 9, PW + 18, PH + 18, PR + 6);
-  ctx.fillStyle = '#f4f4f2'; ctx.fill();
-  ctx.restore();
-  const headImg = socialActivePhoto || await loadActiveSocialPhoto(row);
-  ctx.save();
-  roundRectPath(ctx, PX, PY, PW, PH, PR);
-  ctx.clip();
-  ctx.fillStyle = '#0d1b2e'; ctx.fillRect(PX, PY, PW, PH);
-  if (headImg) {
-    clampSocialPhotoOffset(headImg, SOCIAL_PHOTO, socialPhotoZoom);
-    drawSocialPhoto(ctx, headImg, SOCIAL_PHOTO, socialPhotoZoom);
-  }
-  ctx.restore();
-
-  // JMF badge, top-left — the brand tag every export in this app carries, moved up from the
-  // photo-box stack so it reads as the card's own corner mark instead of a second team logo
+  // JMF badge, top-left corner mark
   if (jmfLogoImg) {
     const js = 56;
-    ctx.drawImage(jmfLogoImg, PX, 20, js, js);
+    ctx.drawImage(jmfLogoImg, 60, 20, js, js);
   }
 
-  // name: first name small and silver, last name huge with a brushed-steel gradient — right
-  // column is centered so it holds up whether the name is four letters or a hyphenated dozen
-  const RX0 = PX + PW + 34, RX1 = SOCIAL_W - 40, RCX = (RX0 + RX1) / 2, RW = RX1 - RX0;
+  // name, spread across the full card width — no headshot competing for space means it can run
+  // bigger than when it was confined to the right-hand stat column
+  const fullW = SOCIAL_W - 160;
   ctx.textAlign = 'center';
   // strip the known last name off the end rather than just dropping the final word — "St. Brown"
   // is two words, and a naive last-token split would leave "St." stuck on the first name
@@ -2251,29 +2106,39 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   const firstName = (row.lastName && fullName.endsWith(row.lastName)
     ? fullName.slice(0, fullName.length - row.lastName.length)
     : fullName.split(' ').slice(0, -1).join(' ')).trim().toUpperCase() || fullName.toUpperCase();
-  ctx.fillStyle = '#aab4c4'; ctx.font = '700 40px "Archivo Black"';
-  ctx.fillText(firstName, RCX, 176);
+  ctx.fillStyle = '#aab4c4'; ctx.font = '700 46px "Archivo Black"';
+  ctx.fillText(firstName, SOCIAL_W / 2, 190);
 
   const lastName = (row.lastName || row.name || '').toUpperCase().replace(/\./g, '');
-  let ns = 108;
+  let ns = 170;
   ctx.font = `700 ${ns}px "Archivo Black"`;
-  while (ns > 52 && ctx.measureText(lastName).width > RW) ctx.font = `700 ${ns -= 4}px "Archivo Black"`;
-  const nameGrad = ctx.createLinearGradient(0, 210, 0, 300);
+  while (ns > 70 && ctx.measureText(lastName).width > fullW) ctx.font = `700 ${ns -= 6}px "Archivo Black"`;
+  const nameGrad = ctx.createLinearGradient(0, 220, 0, 340);
   nameGrad.addColorStop(0, '#ffffff'); nameGrad.addColorStop(.55, '#dfe4ea'); nameGrad.addColorStop(1, '#aab4c2');
   ctx.fillStyle = nameGrad;
-  ctx.fillText(lastName, RCX, 296);
+  ctx.fillText(lastName, SOCIAL_W / 2, 340);
 
   if (timeframeLabel) {
-    ctx.font = '700 25px "DM Mono"'; ctx.fillStyle = '#fff';
-    let ts = 25, label = timeframeLabel.toUpperCase();
+    let ts = 28, label = timeframeLabel.toUpperCase();
     ctx.font = `700 ${ts}px "DM Mono"`;
-    while (ts > 14 && ctx.measureText(label).width > RW) ctx.font = `700 ${ts -= 1}px "DM Mono"`;
-    ctx.fillText(label, RCX, 336);
+    while (ts > 14 && ctx.measureText(label).width > fullW) ctx.font = `700 ${ts -= 1}px "DM Mono"`;
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, SOCIAL_W / 2, 388);
+  }
+
+  // below the name: team logo fills the left side, stats keep their own column on the right —
+  // same stat geometry as before, just no photo box for it to sit beside
+  const RX0 = 580, RX1 = SOCIAL_W - 40, RCX = (RX0 + RX1) / 2, RW = RX1 - RX0;
+  const zoneTop = 440, zoneBottom = 1290;
+  if (logoImg) {
+    const ls = Math.min(520, zoneBottom - zoneTop);
+    const leftCX = RX0 / 2;
+    ctx.drawImage(logoImg, leftCX - ls / 2, zoneTop + (zoneBottom - zoneTop - ls) / 2, ls, ls);
   }
 
   // stat stack: a huge value over a dark label pill, filling the column below the name
   const primary = cells.slice(0, SOCIAL_MAX_PRIMARY), secondary = cells.slice(SOCIAL_MAX_PRIMARY);
-  const stackTop = 380, stackBottom = secondary.length ? 1244 : 1290;
+  const stackTop = zoneTop, stackBottom = secondary.length ? 1244 : 1290;
   const slotH = (stackBottom - stackTop) / Math.max(primary.length, 1);
   primary.forEach(([label, value], i) => {
     const slotY = stackTop + slotH * i;
@@ -2511,40 +2376,6 @@ $('modalSend').onclick = toggleObs;
 $('modalUpdate').onclick = () => pushGraphic('Updated ✓');
 $('modalDownload').onclick = downloadGraphic;
 $('modalSocialDownload').onclick = downloadSocialCard;
-$('photoDrop').onclick = e => { if (e.target.id !== 'photoDropClear') $('photoInput').click(); };
-$('photoInput').onchange = e => setSocialPhoto(e.target.files[0]);
-$('photoDropClear').onclick = e => { e.stopPropagation(); clearSocialPhoto(); };
-$('photoDrop').ondragover = e => { e.preventDefault(); $('photoDrop').classList.add('drag'); };
-$('photoDrop').ondragleave = () => $('photoDrop').classList.remove('drag');
-$('photoDrop').ondrop = e => {
-  e.preventDefault();
-  $('photoDrop').classList.remove('drag');
-  const file = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (file) setSocialPhoto(file);
-};
-$('photoZoomSlider').oninput = () => {
-  socialPhotoZoom = +$('photoZoomSlider').value / 100;
-  repaintPhotoPreview();
-};
-$('photoResetBtn').onclick = () => { resetSocialPhotoFraming(); repaintPhotoPreview(); };
-// pointer events unify mouse + touch dragging on the preview in one listener set
-(() => {
-  const pv = $('photoPreviewCanvas');
-  let dragging = false, start = null;
-  pv.onpointerdown = e => {
-    dragging = true;
-    start = { x: e.clientX, y: e.clientY, ox: socialPhotoOffsetX, oy: socialPhotoOffsetY };
-    pv.setPointerCapture(e.pointerId);
-  };
-  pv.onpointermove = e => {
-    if (!dragging) return;
-    const s = pv.width / SOCIAL_PHOTO.w;
-    socialPhotoOffsetX = start.ox + (e.clientX - start.x) / s;
-    socialPhotoOffsetY = start.oy + (e.clientY - start.y) / s;
-    repaintPhotoPreview();
-  };
-  pv.onpointerup = () => { dragging = false; };
-})();
 $('modalBackdrop').onclick = e => { if (e.target.id === 'modalBackdrop') closeModal(); };
 document.onkeydown = e => { if (e.key === 'Escape' && !$('modalBackdrop').hidden) closeModal(); };
 $('openDisplay').onclick = () => {
