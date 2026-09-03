@@ -2177,6 +2177,22 @@ async function loadActiveSocialPhoto(row) {
   return socialActivePhoto;
 }
 
+// A faint yard-line grid over the team's own color — the most explicitly "football" of the
+// background treatments tried, and the one that stuck.
+function paintFieldGrid(ctx, w, h, teamRGB) {
+  ctx.fillStyle = `rgb(${teamRGB[0]},${teamRGB[1]},${teamRGB[2]})`;
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,.12)';
+  ctx.lineWidth = 2;
+  const spacing = 60;
+  for (let x = 0; x <= w; x += spacing) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    for (let y = 20; y < h; y += spacing) {
+      ctx.beginPath(); ctx.moveTo(x - 8, y); ctx.lineTo(x + 8, y); ctx.stroke();
+    }
+  }
+}
+
 async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   await Promise.all([
     document.fonts.load('700 130px "Archivo Black"'), document.fonts.load('700 48px "Archivo Black"'),
@@ -2190,8 +2206,8 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   canvas.width = SOCIAL_W; canvas.height = SOCIAL_H;
   const ctx = canvas.getContext('2d');
 
-  // ground: a flat fill of the team's own color, sampled straight from its logo
-  ctx.fillStyle = `rgb(${teamRGB[0]},${teamRGB[1]},${teamRGB[2]})`; ctx.fillRect(0, 0, SOCIAL_W, SOCIAL_H);
+  // ground: the team's own color, sampled straight from its logo, with a faint yard-line grid
+  paintFieldGrid(ctx, SOCIAL_W, SOCIAL_H, teamRGB);
 
   // team mark and the JM Football badge, both squared up and centered under the photo box —
   // stacked, not bled off an edge, so the whole left column reads as one aligned block
