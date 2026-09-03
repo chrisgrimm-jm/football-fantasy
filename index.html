@@ -2102,13 +2102,46 @@ async function refreshSocialPreview() {
   ctx.drawImage(full, 0, 0, canvas.width, canvas.height);
 }
 
+// The OBS bar's labels (NICE_LABEL) are deliberately clipped short — "seven cells is the most
+// that reads at a glance from a couch" — but the Social card has a whole pill per stat, so it
+// spells them out instead. Only the stats actually reachable through CELL_SPEC/fantasy get an
+// entry; anything else falls back to the same short label the OBS bar uses.
+const SOCIAL_FULL_LABEL = {
+  completions: 'COMPLETIONS', passingAttempts: 'ATTEMPTS', passingYards: 'PASSING YARDS',
+  completionPct: 'COMPLETION %', yardsPerPassAttempt: 'YARDS PER ATTEMPT',
+  passingTouchdowns: 'PASSING TDS', interceptions: 'INTERCEPTIONS', longPassing: 'LONGEST PASS',
+  sacks: 'SACKS', QBRating: 'PASSER RATING',
+  rushingAttempts: 'CARRIES', rushingYards: 'RUSHING YARDS', yardsPerRushAttempt: 'YARDS PER CARRY',
+  rushingTouchdowns: 'RUSHING TDS', longRushing: 'LONGEST RUSH', rushingFirstDowns: 'RUSHING FIRST DOWNS',
+  receptions: 'RECEPTIONS', receivingTargets: 'TARGETS', receivingYards: 'RECEIVING YARDS',
+  yardsPerReception: 'YARDS PER CATCH', receivingTouchdowns: 'RECEIVING TDS', longReception: 'LONGEST CATCH',
+  fumbles: 'FUMBLES', fumblesLost: 'FUMBLES LOST', fumblesForced: 'FORCED FUMBLES',
+  fumblesRecovered: 'FUMBLES RECOVERED', totalTwoPointConvs: 'TWO-POINT CONVERSIONS',
+  totalTackles: 'TACKLES', soloTackles: 'SOLO TACKLES', stuffs: 'TACKLES FOR LOSS',
+  passesDefended: 'PASSES DEFENDED', interceptionYards: 'INTERCEPTION YARDS',
+  interceptionTouchdowns: 'PICK-SIX TDS', longInterception: 'LONGEST INTERCEPTION',
+  'fieldGoalsMade-fieldGoalAttempts': 'FIELD GOALS', fieldGoalPct: 'FIELD GOAL %',
+  longFieldGoalMade: 'LONGEST FIELD GOAL', 'extraPointsMade-extraPointAttempts': 'EXTRA POINTS',
+  totalKickingPoints: 'TOTAL POINTS',
+  punts: 'PUNTS', grossAvgPuntYards: 'PUNT AVERAGE', netAvgPuntYards: 'NET PUNT AVERAGE',
+  puntsInside20: 'INSIDE THE 20', longPunt: 'LONGEST PUNT',
+  kickReturns: 'KICK RETURNS', kickReturnYards: 'KICK RETURN YARDS', longKickReturn: 'LONGEST KICK RETURN',
+  puntReturns: 'PUNT RETURNS', puntReturnYards: 'PUNT RETURN YARDS', longPuntReturn: 'LONGEST PUNT RETURN',
+  gamesPlayed: 'GAMES PLAYED',
+  fantasyPointsStd: 'FANTASY POINTS (STANDARD)', fantasyPointsHalf: 'FANTASY POINTS (HALF PPR)',
+  fantasyPointsPPR: 'FANTASY POINTS (PPR)',
+};
+
 // Same picks (and order) as the lower third — including fantasy points, since PPR is just another
 // entry in that same grid (see CELL_SPEC) — capped to what the card's layout has room for: the
 // first five go big in the stack, a 6th/7th (if picked) drop to the small line at the very bottom.
 const SOCIAL_MAX_PRIMARY = 5, SOCIAL_MAX_SECONDARY = 2;
 function socialCells() {
-  const data = graphicData();
-  return data ? data.cells.slice(0, SOCIAL_MAX_PRIMARY + SOCIAL_MAX_SECONDARY) : [];
+  if (!modalMap) return [];
+  return (modalEntries || [])
+    .filter(([name]) => modalPicks.includes(name) && hasVal(modalMap[name]))
+    .map(([name, label]) => [SOCIAL_FULL_LABEL[name] || label, modalMap[name]])
+    .slice(0, SOCIAL_MAX_PRIMARY + SOCIAL_MAX_SECONDARY);
 }
 
 const SOCIAL_W = 1080, SOCIAL_H = 1350;
@@ -2171,7 +2204,7 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
     stackY += ls + 24;
   }
   if (jmfLogoImg) {
-    const js = 130;
+    const js = 180;
     ctx.drawImage(jmfLogoImg, boxCenterX - js / 2, stackY, js, js);
   }
 
@@ -2247,11 +2280,16 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   });
 
   if (secondary.length) {
-    ctx.font = '700 28px "Archivo Black"';
     const parts = secondary.map(([label, value]) => `${value} ${String(label).toUpperCase()}`);
     const gap = 26;
-    const widths = parts.map(p => ctx.measureText(p).width);
-    let cx = RCX - (widths.reduce((a, b) => a + b, 0) + gap * (parts.length - 1)) / 2;
+    let fs = 28, widths;
+    const totalWidth = () => {
+      ctx.font = `700 ${fs}px "Archivo Black"`;
+      widths = parts.map(p => ctx.measureText(p).width);
+      return widths.reduce((a, b) => a + b, 0) + gap * (parts.length - 1);
+    };
+    while (fs > 14 && totalWidth() > RW) fs -= 1;
+    let cx = RCX - totalWidth() / 2;
     ctx.textAlign = 'left'; ctx.fillStyle = '#fff';
     parts.forEach((p, i) => { ctx.fillText(p, cx, 1284); cx += widths[i] + gap; });
   }
