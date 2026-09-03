@@ -2160,20 +2160,19 @@ async function renderSocialCardCanvas(row, cells, timeframeLabel) {
   // ground: a flat fill of the team's own color, sampled straight from its logo
   ctx.fillStyle = `rgb(${teamRGB[0]},${teamRGB[1]},${teamRGB[2]})`; ctx.fillRect(0, 0, SOCIAL_W, SOCIAL_H);
 
-  // team mark, bleeding off the bottom-left corner, close under the photo frame — behind it,
-  // so the frame's white border overlaps the top of the mark — with the JM Football badge
-  // sitting just below it, small and fully in frame rather than bled off an edge
+  // team mark and the JM Football badge, both squared up and centered under the photo box —
+  // stacked, not bled off an edge, so the whole left column reads as one aligned block
   const { x: PX, y: PY, w: PW, h: PH, r: PR } = SOCIAL_PHOTO;
-  const teamLogoBottom = PY + PH - 130 + 460;
+  const boxCenterX = PX + PW / 2;
+  let stackY = PY + PH + 20;
   if (logoImg) {
-    const ls = 460;
-    ctx.save(); ctx.globalAlpha = .92;
-    ctx.drawImage(logoImg, -120, PY + PH - 130, ls, ls);
-    ctx.restore();
+    const ls = 260;
+    ctx.drawImage(logoImg, boxCenterX - ls / 2, stackY, ls, ls);
+    stackY += ls + 20;
   }
   if (jmfLogoImg) {
-    const js = 130;
-    ctx.drawImage(jmfLogoImg, PX, teamLogoBottom + 24, js, js);
+    const js = 110;
+    ctx.drawImage(jmfLogoImg, boxCenterX - js / 2, stackY, js, js);
   }
 
   // headshot, cover-fit into a rounded portrait frame with a white border like a printed photo —
